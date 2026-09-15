@@ -36,14 +36,19 @@ export async function balanceOf (account) {
   return formatEther(await account.getBalance())
 }
 
-// the three checks of the demo, each returns a one-line result for the log
+// the three checks of the demo, each returns a one-line result for the log and the details behind it
 export const ACTIONS = {
   async signMessage (account) {
     const message = `wdk signers demo ${new Date().toISOString()}`
     const signature = await account.sign(message)
     const recovered = verifyMessage(message, signature)
-    const ok = recovered === await account.getAddress()
-    return { ok, text: ok ? `message signed, signature recovers to the account` : `recovered ${recovered}` }
+    const address = await account.getAddress()
+    const ok = recovered === address
+    return {
+      ok,
+      text: ok ? `message signed, signature recovers to the account` : `recovered ${recovered}`,
+      details: { address, message, signature, recovered }
+    }
   },
 
   // account.signTransaction hands the request to the signer as is, only sendTransaction populates
@@ -52,18 +57,33 @@ export const ACTIONS = {
     const address = await account.getAddress()
     const provider = new JsonRpcProvider(RPC_URL, CHAIN_ID, { staticNetwork: true })
     const [nonce, fees] = await Promise.all([provider.getTransactionCount(address), provider.getFeeData()])
-    const signed = await account.signTransaction({
+    const unsigned = {
       type: 2, chainId: CHAIN_ID, nonce, to: address, value: 0n, data: '0x', gasLimit: 21000n,
       maxFeePerGas: fees.maxFeePerGas, maxPriorityFeePerGas: fees.maxPriorityFeePerGas
-    })
+    }
+    const signed = await account.signTransaction(unsigned)
     const tx = Transaction.from(signed)
     const ok = tx.from === address
-    return { ok, text: ok ? `transaction signed, not sent, ${signed.length / 2 - 1} bytes, from recovers` : `from recovers to ${tx.from}` }
+    return {
+      ok,
+      text: ok ? `transaction signed, not sent, ${signed.length / 2 - 1} bytes, from recovers` : `from recovers to ${tx.from}`,
+      details: { address, unsigned, signed, recovered: tx.from, hash: tx.hash, signature: tx.signature?.serialized }
+    }
   },
 
   async sendToSelf (account) {
     const address = await account.getAddress()
-    const { hash } = await account.sendTransaction({ to: address, value: 0n, data: '0x' })
-    return { ok: true, text: `sent to self, ${hash}`, link: `${EXPLORER}/tx/${hash}` }
+    const { hash, fee } = await account.sendTransaction({ to: address, value: 0n, data: '0x' })
+    return {
+      ok: true,
+      text: `sent to self, ${hash}`,
+      link: `${EXPLORER}/tx/${hash}`,
+      details: { address, to: address, value: 0n, hash, fee, explorer: `${EXPLORER}/tx/${hash}` }
+    }
   }
+}
+
+// details go to the log as text, bigints and nested objects included
+export function formatDetails (details) {
+  return JSON.stringify(details, (_, v) => (typeof v === 'bigint' ? v.toString() : v), 2)
 }

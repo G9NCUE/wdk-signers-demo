@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { BROWSER_SIGNERS, loadRemoteSigners } from './signers/catalog.js'
-import { ACTIONS, EXPLORER, balanceOf, createWallet, loadAccounts } from './lib/wallet.js'
+import { ACTIONS, EXPLORER, balanceOf, createWallet, formatDetails, loadAccounts } from './lib/wallet.js'
+
+// what an error can tell beyond its message: the WDK error class, a cause, a provider's code
+function errorDetails (e) {
+  const out = { error: e.message, type: e.name || e.constructor?.name }
+  if (e.code !== undefined) out.code = e.code
+  if (e.cause) out.cause = e.cause.message ?? String(e.cause)
+  if (e.stack) out.stack = e.stack.split('\n').slice(0, 6).join('\n')
+  return out
+}
 
 export default function App () {
   const [signers, setSigners] = useState(BROWSER_SIGNERS)
@@ -12,7 +21,10 @@ export default function App () {
   const [busy, setBusy] = useState(null) // `${index}:${action}`
   const [log, setLog] = useState([])
   const [showSecret, setShowSecret] = useState(false)
+  const [logOpen, setLogOpen] = useState(true)
+  const [expanded, setExpanded] = useState(() => new Set()) // log entry ids
   const walletRef = useRef(null)
+  const nextId = useRef(0)
 
   useEffect(() => {
     loadRemoteSigners()
@@ -21,7 +33,11 @@ export default function App () {
   }, [])
 
   const append = useCallback((entry) => {
-    setLog(l => [{ at: new Date().toLocaleTimeString(), ...entry }, ...l].slice(0, 50))
+    setLog(l => [{ id: nextId.current++, at: new Date().toLocaleTimeString(), ...entry }, ...l].slice(0, 50))
+  }, [])
+
+  const toggle = useCallback((id) => {
+    setExpanded(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   }, [])
 
   const refreshBalances = useCallback(async (list) => {
@@ -47,12 +63,17 @@ export default function App () {
       const list = await loadAccounts(handle)
       setAccounts(list)
       setPhase('ready')
-      append({ ok: true, signer: entry.label, text: `${list.length} account${list.length > 1 ? 's' : ''} resolved` })
+      append({
+        ok: true,
+        signer: entry.label,
+        text: `${list.length} account${list.length > 1 ? 's' : ''} resolved`,
+        details: { signer: entry.id, where: entry.where, accounts: list.map(a => ({ index: a.index, path: a.path, address: a.address })) }
+      })
       await refreshBalances(list)
     } catch (e) {
       setPhase('error')
       setError(e.message)
-      append({ ok: false, signer: entry.label, text: e.message })
+      append({ ok: false, signer: entry.label, text: e.message, details: errorDetails(e) })
     }
   }, [append, refreshBalances])
 
@@ -64,7 +85,7 @@ export default function App () {
       append({ ...result, signer: selected.label, account: index })
       if (name === 'sendToSelf') setTimeout(() => refreshBalances(accounts), 15000)
     } catch (e) {
-      append({ ok: false, signer: selected.label, account: index, text: e.message })
+      append({ ok: false, signer: selected.label, account: index, text: e.message, details: errorDetails(e) })
     } finally {
       setBusy(null)
     }
@@ -149,17 +170,37 @@ export default function App () {
         )}
 
         <section className='log'>
-          <h3>Log</h3>
-          {log.length === 0 && <p className='muted'>Nothing yet.</p>}
-          <ul>
-            {log.map((e, i) => (
-              <li key={i} className={e.ok ? 'ok' : 'bad'}>
-                <span className='at'>{e.at}</span>
-                <span className='who'>{e.signer}{e.account !== undefined ? ` #${e.account}` : ''}</span>
-                <span className='what'>{e.link ? <a href={e.link} target='_blank' rel='noreferrer'>{e.text}</a> : e.text}</span>
-              </li>
-            ))}
-          </ul>
+          <div className='log-head'>
+            <button className='ghost toggle' onClick={() => setLogOpen(v => !v)} aria-expanded={logOpen}>
+              <span className='chev'>{logOpen ? '▾' : '▸'}</span> Log <span className='count'>{log.length}</span>
+            </button>
+            {log.length > 0 && logOpen && (
+              <span className='log-tools'>
+                <button className='ghost' onClick={() => setExpanded(new Set(log.map(e => e.id)))}>expand all</button>
+                <button className='ghost' onClick={() => setExpanded(new Set())}>collapse all</button>
+                <button className='ghost' onClick={() => { setLog([]); setExpanded(new Set()) }}>clear</button>
+              </span>
+            )}
+          </div>
+          {logOpen && log.length === 0 && <p className='muted'>Nothing yet.</p>}
+          {logOpen && (
+            <ul>
+              {log.map(e => {
+                const open = expanded.has(e.id)
+                return (
+                  <li key={e.id} className={`${e.ok ? 'ok' : 'bad'} ${open ? 'open' : ''}`}>
+                    <div className='row' onClick={() => e.details && toggle(e.id)} role={e.details ? 'button' : undefined} aria-expanded={e.details ? open : undefined}>
+                      <span className='chev'>{e.details ? (open ? '▾' : '▸') : ''}</span>
+                      <span className='at'>{e.at}</span>
+                      <span className='who'>{e.signer}{e.account !== undefined ? ` #${e.account}` : ''}</span>
+                      <span className='what'>{e.link ? <a href={e.link} target='_blank' rel='noreferrer' onClick={ev => ev.stopPropagation()}>{e.text}</a> : e.text}</span>
+                    </div>
+                    {open && e.details && <pre className='details'>{formatDetails(e.details)}</pre>}
+                  </li>
+                )
+              })}
+            </ul>
+          )}
         </section>
       </main>
     </div>

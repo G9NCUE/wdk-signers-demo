@@ -69,16 +69,26 @@ button.ghost:hover { text-decoration: underline; }
 .accounts .balance { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .accounts .actions { display: flex; gap: 6px; flex-wrap: wrap; }
 
+.log-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.log-head .toggle { padding: 0; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; }
+.log-head .count { display: inline-block; min-width: 18px; padding: 0 6px; border-radius: 999px; background: #e5e7eb; color: var(--ink); font-size: 11px; text-align: center; letter-spacing: 0; }
+.log-tools { display: flex; gap: 4px; }
 .log ul { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.log li { display: grid; grid-template-columns: 80px 120px 1fr; gap: 12px; padding: 6px 10px; border-radius: 6px; background: var(--panel); border: 1px solid var(--line); }
+.log li { border-radius: 6px; background: var(--panel); border: 1px solid var(--line); }
 .log li.ok { border-left: 3px solid var(--ok); }
 .log li.bad { border-left: 3px solid var(--bad); }
+.log .row { display: grid; grid-template-columns: 14px 80px 120px 1fr; gap: 12px; padding: 6px 10px; align-items: baseline; }
+.log .row[role='button'] { cursor: pointer; }
+.log .row[role='button']:hover { background: var(--bg); }
+.log .chev { color: var(--muted); font-size: 11px; }
 .log .at { color: var(--muted); font-variant-numeric: tabular-nums; }
 .log .who { font-weight: 500; }
 .log .what { word-break: break-all; }
+.log .details { margin: 0; padding: 10px 12px 12px 36px; border-top: 1px solid var(--line); background: var(--bg); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all; color: var(--ink); }
 
 @media (max-width: 800px) {
   .layout { grid-template-columns: 1fr; }
   .sidebar { border-right: none; border-bottom: 1px solid var(--line); }
-  .log li { grid-template-columns: 1fr; gap: 2px; }
+  .log .row { grid-template-columns: 14px 1fr; gap: 2px 8px; }
+  .log .details { padding-left: 12px; }
 }
