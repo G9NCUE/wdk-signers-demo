@@ -133,34 +133,60 @@ export default function App () {
 
   return (
     <div className='page'>
-      <div className='topline'>
+      <header className='topbar'>
+        <div className='topbar-inner'>
+          <div className='topbar-left'>
+            <a className='brand' href='https://github.com/G9NCUE/wdk-atlas' aria-label='WDK Atlas'>
+              <img src='/assets/wdk-logo.svg' alt='WDK' width='170' height='61' />
+            </a>
+            <ul className='nav'>
+              <li><span aria-current='page'>Signers demo</span></li>
+            </ul>
+          </div>
+          <div className='topbar-right'>
+            <div className='view-toggle' role='group' aria-label='Layout'>
+              <button aria-pressed={!devOpen} onClick={() => setDevOpen(false)}>Phone</button>
+              <button aria-pressed={devOpen} onClick={() => setDevOpen(true)}>Phone + log</button>
+            </div>
+            <a className='gh-link' href='https://github.com/G9NCUE/wdk-signers-demo' aria-label='Source on GitHub' title='Source on GitHub'>
+              <svg viewBox='0 0 16 16' width='20' height='20' aria-hidden='true' fill='currentColor'><path d='M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z' /></svg>
+            </a>
+          </div>
+        </div>
+      </header>
+
+      <header className='site-header'>
         <div>
           <h1>WDK signers</h1>
-          <p className='muted'>One <code>WalletManagerEvm</code>, one <code>ISigner</code> at a time, Sepolia.</p>
+          <p className='subtitle'>One <code>WalletManagerEvm</code>, one <code>ISigner</code> at a time, on Sepolia. Seven signers behind the same contract.</p>
         </div>
-        <button className='ghost' onClick={() => setDevOpen(v => !v)}>{devOpen ? 'hide' : 'show'} developer panel</button>
-      </div>
+        <ul className='legend' aria-label='Status legend'>
+          <li><span className='state-dot ready' /> ready</li>
+          <li><span className='state-dot connecting' /> connecting</li>
+          <li><span className='state-dot error' /> error</li>
+        </ul>
+      </header>
 
       <div className={`stage ${devOpen ? '' : 'solo'}`}>
         <div className='phone'>
           <div className='screen'>
             <div className='statusbar'><span>9:41</span><span className='sig'>●●● ᯤ ▮</span></div>
 
-            <header className='topbar'>
+            <div className='phone-top'>
               <button className='chip' onClick={() => setSheet(true)} aria-haspopup='dialog'>
-                <span className={`dot ${phase}`} />
+                <span className={`state-dot ${phase}`} />
                 {selected ? selected.label : 'Choose a signer'}
-                <span className='chev'>▾</span>
+                <span className='chev' aria-hidden='true' />
               </button>
               <button className='icon' title='refresh balances' disabled={phase !== 'ready'} onClick={() => refreshBalances(accounts)}>↻</button>
-            </header>
+            </div>
 
-            <section className={`card ${phase}`}>
-              <div className='card-top'>
-                <span>{account ? (selected.isDerivable === false ? 'Account' : `Account ${account.index}`) : selected ? selected.label : 'Wallet'}</span>
-                <span className='net'>Sepolia</span>
+            <section className={`tile ${phase}`}>
+              <div className='tile-top'>
+                <span className='tile-label'>{account ? (selected.isDerivable === false ? 'Account' : `Account ${account.index}`) : selected ? selected.label : 'Wallet'}</span>
+                <span className='status-pill plain'>Sepolia</span>
               </div>
-              <div className='amount' title={account?.balance ?? ''}>
+              <div className='tile-value' title={account?.balance ?? ''}>
                 {phase === 'connecting' ? <span className='skeleton' /> : balance ?? '—'}
                 {balance !== null && phase === 'ready' && <span className='unit'>ETH</span>}
               </div>
@@ -173,7 +199,7 @@ export default function App () {
                       <a className='mini' href={`${EXPLORER}/address/${account.address}`} target='_blank' rel='noreferrer'>explorer</a>
                     </>
                     )
-                  : <span className='muted-on-dark'>{phase === 'connecting' ? 'connecting…' : phase === 'error' ? 'could not connect' : 'no signer selected'}</span>}
+                  : <span>{phase === 'connecting' ? 'connecting…' : phase === 'error' ? 'could not connect' : 'no signer selected'}</span>}
               </div>
               {account?.path && <div className='path'>{account.path}</div>}
             </section>
@@ -203,7 +229,7 @@ export default function App () {
                     title={allowed ? a.label : `${selected.label} cannot ${a.label.toLowerCase()} for an application`}
                     onClick={() => run(a.name)}
                   >
-                    <span className='round'>{busy === a.name ? '…' : a.icon}</span>
+                    <span className='glyph' aria-hidden='true'>{busy === a.name ? '…' : a.icon}</span>
                     <span>{a.label}</span>
                   </button>
                 )
@@ -219,7 +245,7 @@ export default function App () {
 
             <section className='history'>
               <div className='history-head'>
-                <h4>History{account ? ` · #${account.index}` : ''}</h4>
+                <h4 className='eyebrow'>History{account ? ` · #${account.index}` : ''}</h4>
                 {history && !history.loading && (
                   <button className='link small' onClick={() => setHistoryTick(t => t + 1)}>refresh</button>
                 )}
@@ -255,7 +281,7 @@ export default function App () {
               <div className='sheet-backdrop' onClick={() => setSheet(false)}>
                 <div className='sheet' role='dialog' aria-label='Choose a signer' onClick={ev => ev.stopPropagation()}>
                   <div className='grip' />
-                  <h4>Signers</h4>
+                  <h4 className='eyebrow'>Signers</h4>
                   <ul className='signers'>
                     {signers.map(s => (
                       <li key={s.id}>
@@ -290,14 +316,14 @@ function Log ({ log, expanded, toggle, setExpanded, clear }) {
   return (
     <section className='log'>
       <div className='log-head'>
-        <button className='ghost toggle' onClick={() => setOpen(v => !v)} aria-expanded={open}>
-          <span className='chev'>{open ? '▾' : '▸'}</span> Log <span className='count'>{log.length}</span>
+        <button className='toggle' onClick={() => setOpen(v => !v)} aria-expanded={open}>
+          <span className='chev'>{open ? '▾' : '▸'}</span> <span className='eyebrow'>Log</span> <span className='count'>{log.length}</span>
         </button>
         {log.length > 0 && open && (
           <span className='log-tools'>
-            <button className='ghost' onClick={() => setExpanded(new Set(log.map(e => e.id)))}>expand all</button>
-            <button className='ghost' onClick={() => setExpanded(new Set())}>collapse all</button>
-            <button className='ghost' onClick={clear}>clear</button>
+            <button className='link small' onClick={() => setExpanded(new Set(log.map(e => e.id)))}>expand all</button>
+            <button className='link small' onClick={() => setExpanded(new Set())}>collapse all</button>
+            <button className='link small' onClick={clear}>clear</button>
           </span>
         )}
       </div>

@@ -46,6 +46,13 @@ MetaMask (or Rabby, Coinbase Wallet) signs messages and typed data, but never re
 transaction and does not sign EIP-7702 authorizations: "Sign tx" is greyed out for it, and "Send"
 goes through the wallet's own `eth_sendTransaction` instead of the WDK's sign-then-broadcast.
 
+## Design
+
+Same tokens, type and components as [wdk-atlas](https://github.com/G9NCUE/wdk-atlas): dark ground,
+orange accent, Inter, Space Grotesk and Inconsolata self-hosted under `public/assets/fonts/` (SIL Open
+Font License, see the LICENSE.md there), 10 px cards on 1 px lines, mono uppercase eyebrows. The
+balance is an atlas tile, the log an atlas chart card.
+
 ## Run
 
 ```
