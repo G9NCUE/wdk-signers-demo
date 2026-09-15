@@ -32,6 +32,7 @@ export const BROWSER_SIGNERS = [
     label: 'Seed phrase',
     kind: 'in the browser, WDK SeedSignerEvm',
     where: 'browser',
+    key: 'local',
     available: true,
     isDerivable: true,
     can: FULL,
@@ -43,6 +44,7 @@ export const BROWSER_SIGNERS = [
     label: 'Ledger',
     kind: 'hardware, WebHID, wdk-signer-ledger-evm',
     where: 'browser',
+    key: 'hardware',
     available: typeof navigator !== 'undefined' && 'hid' in navigator,
     reason: 'WebHID is not available in this browser, use Chrome or Edge',
     isDerivable: true,
@@ -54,6 +56,7 @@ export const BROWSER_SIGNERS = [
     label: 'MetaMask',
     kind: 'injected wallet, EIP-1193, wdk-signer-eip1193-evm',
     where: 'browser',
+    key: 'extension',
     available: Eip1193SignerEvm.isAvailable(globalThis),
     reason: 'no injected wallet found, install MetaMask, Rabby or Coinbase Wallet',
     isDerivable: false,
@@ -70,6 +73,7 @@ export async function loadRemoteSigners () {
   return list.map(s => ({
     ...s,
     where: 'service',
+    key: 'remote',
     can: FULL,
     build: async () => new RemoteSignerEvm({ id: s.id, path: s.path, isDerivable: s.isDerivable })
   }))

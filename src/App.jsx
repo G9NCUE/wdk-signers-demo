@@ -287,7 +287,7 @@ export default function App () {
                       <li key={s.id}>
                         <button className={`signer ${selected?.id === s.id ? 'active' : ''} ${s.available ? '' : 'off'}`} onClick={() => select(s)} disabled={!s.available}>
                           <span className='label'>{s.label}</span>
-                          <span className={`where ${s.where}`}>{s.where}</span>
+                          <span className={`where ${s.key}`} title={s.where === 'service' ? 'signs through the local service' : 'signs in the browser'}>{s.key}</span>
                           <span className='kind'>{s.kind}</span>
                           {!s.available && <span className='reason'>{s.reason}</span>}
                         </button>

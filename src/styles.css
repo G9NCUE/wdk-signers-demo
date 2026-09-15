@@ -179,8 +179,10 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 .signer .label { font-size: 14px; font-weight: 600; }
 .signer .kind { grid-column: 1; font-size: 12px; line-height: 16px; color: var(--secondary); }
 .signer .where { grid-row: 1; grid-column: 2; align-self: start; padding: 1px 6px; border-radius: 9px; font: 600 10px/14px var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; background: var(--surface); color: var(--secondary); border: 1px solid var(--line-subtle); }
-.signer .where.browser { color: var(--success); border-color: color-mix(in srgb, var(--success) 45%, transparent); }
-.signer .where.service { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 50%, transparent); }
+.signer .where.local { color: var(--success); border-color: color-mix(in srgb, var(--success) 45%, transparent); }
+.signer .where.hardware { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+.signer .where.extension { color: hsl(266 100% 74%); border-color: hsl(266 100% 64% / .5); }
+.signer .where.remote { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 50%, transparent); }
 .signer .reason { grid-column: 1 / -1; font-size: 11px; line-height: 14px; color: var(--error); }
 
 /* ---- Developer panel, the atlas' chart card ---------------------------------------------------- */
