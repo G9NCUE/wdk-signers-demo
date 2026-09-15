@@ -23,13 +23,20 @@ entry expandable to the bytes behind it.
 
 ```
 src/                the Vite + React app, WDK runs here
+  App.jsx                        the phone, the picker and send sheets, the developer log
   signers/catalog.js             the list above, browser signers built in place
   signers/remote-signer-evm.js   ISigner whose calls go to the service over HTTP
-  lib/wallet.js                  WalletManagerEvm per signer, accounts, balances, the three checks
+  lib/wallet.js                  WalletManagerEvm per signer, accounts, balances, the three actions
+  lib/recipients.js              the other demo accounts, as send targets
 server/             the local signing service, Hono on 127.0.0.1:8787
   registry.js                    one root signer per provider, built from .env
-  index.js                       POST /api/signers/:id/{derive,address,sign,signTransaction,signTypedData,signAuthorization}
-  probe.js                       the same calls from Node, through the real WalletManagerEvm
+  app.js                         GET /api/signers, GET /api/history/:address,
+                                 POST /api/signers/:id/{derive,address,sign,signTransaction,signTypedData,signAuthorization}
+  index.js                       the listener
+  history.js                     Blockscout and WDK indexer, merged
+  probe.js                       the same signer calls from Node, through the real WalletManagerEvm
+  setup-openfort.mjs             one-time: creates the Openfort backend wallet, prints the .env line
+tests/              npm test, npm run test:live, npm run test:browser (see Tests)
 ```
 
 API keys never reach the browser: the service holds the four remote signers and answers with
