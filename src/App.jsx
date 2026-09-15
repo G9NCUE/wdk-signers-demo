@@ -245,7 +245,7 @@ export default function App () {
 
             <section className='history'>
               <div className='history-head'>
-                <h4 className='eyebrow'>History{account ? ` · #${account.index}` : ''}</h4>
+                <h4 className='eyebrow'>History{account?.index !== undefined ? ` · #${account.index}` : ''}</h4>
                 {history && !history.loading && (
                   <button className='link small' onClick={() => setHistoryTick(t => t + 1)}>refresh</button>
                 )}
