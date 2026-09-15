@@ -68,6 +68,23 @@ click on Ledger opens the browser's device picker. Sepolia ETH comes from any fa
 `node server/probe.js [id]` exercises the configured remote signers from the terminal, including
 typed data and EIP-7702 authorizations, and prints the timing.
 
+## Tests
+
+Three layers, nothing is ever broadcast:
+
+```
+npm test              # offline: bigint JSON, the HTTP signer protocol through the real WalletManagerEvm
+                      # on the WDK's own signers, the history merge on stubbed Blockscout and indexer replies
+npm run test:live     # the flow on every provider configured in .env, service in-process: balance from
+                      # Sepolia, a transaction populated from the chain and signed, message, typed data;
+                      # unconfigured providers skip, a provider quota skips with the reason
+npm run test:browser  # the phone in Chrome (Playwright, `chrome` channel) with `npm run dev` up:
+                      # picker, accounts, balances, history, sign message, sign tx, log details;
+                      # DEMO_SIGNER=Openfort picks another signer
+```
+
+Ledger and MetaMask need a device or an extension in a headed browser and stay manual.
+
 ## Findings on the WDK contract, from building this
 
 - `account.signTransaction(tx)` hands the request to the signer as is; only `sendTransaction`
