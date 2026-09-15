@@ -87,21 +87,31 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 .status-pill.plain { color: var(--secondary); background: var(--surface); }
 
 .page { padding: 0 0 48px; }
-.stage { display: grid; grid-template-columns: 420px 1fr; gap: 32px; align-items: start; padding: 20px 32px 0; }
-.stage.solo { grid-template-columns: 420px; justify-content: center; }
+.stage { display: grid; grid-template-columns: 440px 1fr; gap: 32px; align-items: start; padding: 20px 32px 0; }
+.stage.solo { grid-template-columns: 440px; justify-content: center; }
 
 /* ---- The phone ---------------------------------------------------------------------------------- */
-/* a titanium bezel with a lit rim and a faint accent glow, so the device reads against the dark ground;
-   inside the screen the lines and cards are one step lighter than on the page */
-.phone { position: relative; width: 390px; padding: 12px; border-radius: 48px; margin: 0 auto;
-  background: linear-gradient(160deg, hsl(30 4% 34%) 0%, hsl(30 4% 20%) 45%, hsl(30 4% 14%) 100%);
-  box-shadow: inset 0 0 0 1px hsl(0 0% 60% / .45), 0 0 0 1px hsl(0 0% 0%), 0 30px 70px rgb(0 0 0 / .7), 0 0 120px color-mix(in srgb, var(--accent) 16%, transparent); }
-.phone::before { content: ""; position: absolute; inset: -40px; z-index: -1; border-radius: 80px; background: radial-gradient(60% 50% at 50% 40%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 70%); pointer-events: none; }
-.screen { position: relative; overflow: hidden; height: 780px; border-radius: 38px; display: flex; flex-direction: column; padding: 0 16px 16px;
+/* an iPhone-sized frame, 393 x 852 points: titanium bezel with a lit rim, side buttons, Dynamic Island,
+   home indicator, and a faint accent glow so the device reads against the dark ground.
+   Inside the screen the lines and cards are one step lighter than on the page. */
+.phone { position: relative; width: 413px; padding: 10px; border-radius: 62px; margin: 0 auto;
+  background: linear-gradient(160deg, hsl(30 4% 36%) 0%, hsl(30 4% 22%) 40%, hsl(30 4% 15%) 100%);
+  box-shadow: inset 0 0 0 1.5px hsl(0 0% 62% / .5), inset 0 0 0 4px hsl(0 0% 8%), 0 0 0 1px hsl(0 0% 0%), 0 30px 70px rgb(0 0 0 / .7), 0 0 120px color-mix(in srgb, var(--accent) 16%, transparent); }
+.phone::before { content: ""; position: absolute; inset: -40px; z-index: -1; border-radius: 90px; background: radial-gradient(60% 50% at 50% 40%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 70%); pointer-events: none; }
+.side { position: absolute; width: 4px; border-radius: 2px; background: linear-gradient(90deg, hsl(30 4% 40%), hsl(30 4% 22%)); box-shadow: 0 0 0 1px hsl(0 0% 0% / .6); }
+.side.mute { left: -4px; top: 150px; height: 32px; }
+.side.vol-up { left: -4px; top: 210px; height: 66px; }
+.side.vol-down { left: -4px; top: 290px; height: 66px; }
+.side.power { right: -4px; top: 240px; height: 104px; background: linear-gradient(270deg, hsl(30 4% 40%), hsl(30 4% 22%)); }
+.screen { position: relative; overflow: hidden; height: 852px; border-radius: 52px; display: flex; flex-direction: column; padding: 0 16px 34px;
   --surface: hsl(30 8% 10%); --card: hsl(24 7% 16%); --card-elevated: hsl(33 11% 20%); --line: hsl(30 10% 24%); --line-subtle: hsl(24 7% 26%);
   background: linear-gradient(180deg, hsl(30 8% 12%), hsl(30 8% 8%)); box-shadow: inset 0 0 0 1px hsl(0 0% 0%); }
-.statusbar { display: flex; justify-content: space-between; padding: 14px 12px 4px; font: 600 13px/16px var(--font-sans); color: var(--ink); }
-.statusbar .sig { font-size: 11px; letter-spacing: 1px; color: var(--secondary); }
+.island { position: absolute; top: 11px; left: 50%; width: 126px; height: 37px; transform: translateX(-50%); border-radius: 20px; background: #000; z-index: 3; box-shadow: inset 0 0 0 1px hsl(0 0% 12%); }
+.island::after { content: ""; position: absolute; right: 12px; top: 12px; width: 13px; height: 13px; border-radius: 50%; background: radial-gradient(circle at 40% 35%, hsl(220 30% 18%), #000 65%); }
+.statusbar { display: flex; justify-content: space-between; align-items: center; height: 54px; padding: 8px 14px 0 22px; color: var(--ink); }
+.statusbar .time { font: 600 16px/1 var(--font-sans); letter-spacing: -0.2px; }
+.statusbar .sig { display: inline-flex; align-items: center; gap: 6px; fill: currentColor; }
+.home { position: absolute; bottom: 9px; left: 50%; width: 134px; height: 5px; transform: translateX(-50%); border-radius: 3px; background: hsl(0 0% 100% / .7); z-index: 3; }
 
 .phone-top { display: flex; justify-content: space-between; align-items: center; padding: 10px 0 14px; }
 .chip { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px 0 10px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--card); color: var(--ink); font-size: 14px; font-weight: 600; }
@@ -167,8 +177,8 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 .history .muted, .history .warn { font-size: 13px; }
 
 /* signer picker, a sheet in the atlas' drawer style */
-.sheet-backdrop { position: absolute; inset: 0; background: rgb(0 0 0 / .55); display: flex; align-items: flex-end; border-radius: 38px; }
-.sheet { width: 100%; max-height: 84%; overflow: auto; background: var(--surface); border-top: 1px solid var(--line); border-radius: 22px 22px 38px 38px; padding: 10px 14px 18px; box-shadow: var(--shadow-pop); animation: rise .18s ease-out; scrollbar-width: thin; scrollbar-color: var(--muted) transparent; }
+.sheet-backdrop { position: absolute; inset: 0; background: rgb(0 0 0 / .55); display: flex; align-items: flex-end; border-radius: 52px; z-index: 2; }
+.sheet { width: 100%; max-height: 84%; overflow: auto; background: var(--surface); border-top: 1px solid var(--line); border-radius: 22px 22px 52px 52px; padding: 10px 14px 40px; box-shadow: var(--shadow-pop); animation: rise .18s ease-out; scrollbar-width: thin; scrollbar-color: var(--muted) transparent; }
 @keyframes rise { from { transform: translateY(30px); opacity: .6; } to { transform: none; opacity: 1; } }
 .grip { width: 40px; height: 4px; border-radius: 2px; background: var(--line-subtle); margin: 0 auto 12px; }
 .signers { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -210,7 +220,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 @media (max-width: 960px) {
   .topbar-inner, .site-header, .stage { padding-left: 16px; padding-right: 16px; }
   .stage, .stage.solo { grid-template-columns: 1fr; }
-  .phone { width: 100%; max-width: 390px; }
+  .phone { width: 100%; max-width: 413px; }
   .log .row { grid-template-columns: 12px 1fr; gap: 2px 8px; }
   .log .details { padding-left: 12px; }
 }

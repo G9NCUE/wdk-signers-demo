@@ -168,9 +168,21 @@ export default function App () {
       </header>
 
       <div className={`stage ${devOpen ? '' : 'solo'}`}>
-        <div className='phone'>
+        <div className='phone' aria-label='Phone mock'>
+          <span className='side mute' aria-hidden='true' />
+          <span className='side vol-up' aria-hidden='true' />
+          <span className='side vol-down' aria-hidden='true' />
+          <span className='side power' aria-hidden='true' />
           <div className='screen'>
-            <div className='statusbar'><span>9:41</span><span className='sig'>●●● ᯤ ▮</span></div>
+            <div className='island' aria-hidden='true' />
+            <div className='statusbar' aria-hidden='true'>
+              <span className='time'>9:41</span>
+              <span className='sig'>
+                <svg width='18' height='12' viewBox='0 0 18 12'><rect x='0' y='8' width='3' height='4' rx='.8' /><rect x='5' y='5.5' width='3' height='6.5' rx='.8' /><rect x='10' y='3' width='3' height='9' rx='.8' /><rect x='15' y='0' width='3' height='12' rx='.8' /></svg>
+                <svg width='16' height='12' viewBox='0 0 16 12'><path d='M8 11.2 5.9 9a3 3 0 0 1 4.2 0zM3.7 6.8a6.1 6.1 0 0 1 8.6 0l-1.5 1.5a4 4 0 0 0-5.6 0zM1.2 4.3a9.6 9.6 0 0 1 13.6 0l-1.5 1.5a7.5 7.5 0 0 0-10.6 0z' /></svg>
+                <svg width='27' height='13' viewBox='0 0 27 13'><rect x='.5' y='.5' width='22' height='12' rx='3.5' fill='none' stroke='currentColor' opacity='.4' /><rect x='2' y='2' width='17' height='9' rx='2' /><path d='M24.5 4.5v4a2 2 0 0 0 0-4z' opacity='.4' /></svg>
+              </span>
+            </div>
 
             <div className='phone-top'>
               <button className='chip' onClick={() => setSheet(true)} aria-haspopup='dialog'>
@@ -298,6 +310,7 @@ export default function App () {
                 </div>
               </div>
             )}
+            <span className='home' aria-hidden='true' />
           </div>
         </div>
 
