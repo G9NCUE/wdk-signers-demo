@@ -1,0 +1,59 @@
+# wdk-signers-demo
+
+One Vite app, one `WalletManagerEvm` from `@tetherto/wdk-wallet-evm` 1.0.0-beta.18, six signers
+behind the same `ISigner` contract. Pick a signer on the left, the accounts, addresses and Sepolia
+balances on the right come from that signer. Three checks per account: sign a message, sign a
+populated transaction offline, send 0 ETH to self.
+
+| Signer | Where the key is | Runs in | Package |
+|---|---|---|---|
+| Seed phrase | this browser, localStorage, throwaway | browser | `@tetherto/wdk-wallet-evm/signers` |
+| Ledger | the device, WebHID | browser | [wdk-signer-ledger-evm](https://github.com/G9NCUE/wdk-signer-ledger-evm) |
+| Turnkey | Turnkey HD wallet | service | [wdk-signer-turnkey-evm](https://github.com/G9NCUE/wdk-signer-turnkey-evm) |
+| Dfns | Dfns MPC, wallet per derived key | service | [wdk-signer-dfns-evm](https://github.com/G9NCUE/wdk-signer-dfns-evm) |
+| Openfort | Openfort TEE backend wallet | service | [wdk-signer-openfort-evm](https://github.com/G9NCUE/wdk-signer-openfort-evm) |
+| Fireblocks | Fireblocks MPC vault account | service | [wdk-signer-fireblocks-evm](https://github.com/G9NCUE/wdk-signer-fireblocks-evm) |
+
+## How it is built
+
+```
+src/                the Vite + React app, WDK runs here
+  signers/catalog.js             the list above, browser signers built in place
+  signers/remote-signer-evm.js   ISigner whose calls go to the service over HTTP
+  lib/wallet.js                  WalletManagerEvm per signer, accounts, balances, the three checks
+server/             the local signing service, Hono on 127.0.0.1:8787
+  registry.js                    one root signer per provider, built from .env
+  index.js                       POST /api/signers/:id/{derive,address,sign,signTransaction,signTypedData,signAuthorization}
+  probe.js                       the same calls from Node, through the real WalletManagerEvm
+```
+
+API keys never reach the browser: the service holds the four remote signers and answers with
+addresses and signatures only. Derivable signers (seed, Ledger, Turnkey, Dfns) show accounts 0 to 2
+at `44'/60'/0'/0/i`. Single-key signers (Openfort, Fireblocks) are registered by name with
+`wallet.addSigner()` and show one account.
+
+## Run
+
+```
+npm install
+cp .env.example .env      # fill the providers you have, the others show as unavailable
+npm run dev               # web on http://localhost:5173, service on 127.0.0.1:8787
+```
+
+The signer packages are linked from sibling folders (`file:../wdk-signer-*`), clone them next to
+this one. Ledger needs Chrome or Edge, the device unlocked with the Ethereum app open; the first
+click on Ledger opens the browser's device picker. Sepolia ETH comes from any faucet.
+
+`node server/probe.js [id]` exercises the configured remote signers from the terminal, including
+typed data and EIP-7702 authorizations, and prints the timing.
+
+## Findings on the WDK contract, from building this
+
+- `account.signTransaction(tx)` hands the request to the signer as is; only `sendTransaction`
+  populates nonce, fees and chain. Turnkey refuses an unpopulated transaction, the seed signer
+  signs it with chain id 0. The demo populates before signing.
+- Signer paths differ: `SeedSignerEvm` reports `m/44'/60'/0'/0/0`, the external signers
+  `44'/60'/0'/0/0`. The manager copes (it keeps the last three segments), the UI shows both.
+- beta.18 does not export `ISignerEvm`, every external signer follows the contract by shape.
+- The Ledger kit 1.18 signs EIP-7702 authorizations (`signDelegationAuthorization`), which
+  PR #89 of `wdk-wallet-evm` declared impossible in July.
