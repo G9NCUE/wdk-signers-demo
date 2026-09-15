@@ -29,6 +29,7 @@
     "rxjs": "^7.8.2",
     "sodium-javascript": "^0.8.0",
     "wdk-signer-dfns-evm": "file:../wdk-signer-dfns-evm",
+    "wdk-signer-eip1193-evm": "file:../wdk-signer-eip1193-evm",
     "wdk-signer-fireblocks-evm": "file:../wdk-signer-fireblocks-evm",
     "wdk-signer-ledger-evm": "file:../wdk-signer-ledger-evm",
     "wdk-signer-openfort-evm": "file:../wdk-signer-openfort-evm",

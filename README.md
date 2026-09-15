@@ -1,14 +1,17 @@
 # wdk-signers-demo
 
-One Vite app, one `WalletManagerEvm` from `@tetherto/wdk-wallet-evm` 1.0.0-beta.18, six signers
-behind the same `ISigner` contract. Pick a signer on the left, the accounts, addresses and Sepolia
-balances on the right come from that signer. Three checks per account: sign a message, sign a
-populated transaction offline, send 0 ETH to self.
+One Vite app, one `WalletManagerEvm` from `@tetherto/wdk-wallet-evm` 1.0.0-beta.18, seven signers
+behind the same `ISigner` contract. The app is drawn as a phone: a wallet home with the signer as a
+chip at the top, the balance card, the address, the accounts, and three actions: sign a message, sign
+a populated transaction offline, send 0 ETH to self. Switching signer in the bottom sheet rebuilds the
+accounts and refreshes the Sepolia balances. A developer panel on the side keeps the full log, each
+entry expandable to the bytes behind it.
 
 | Signer | Where the key is | Runs in | Package |
 |---|---|---|---|
 | Seed phrase | this browser, localStorage, throwaway | browser | `@tetherto/wdk-wallet-evm/signers` |
 | Ledger | the device, WebHID | browser | [wdk-signer-ledger-evm](https://github.com/G9NCUE/wdk-signer-ledger-evm) |
+| MetaMask | the extension, EIP-1193 | browser | [wdk-signer-eip1193-evm](https://github.com/G9NCUE/wdk-signer-eip1193-evm) |
 | Turnkey | Turnkey HD wallet | service | [wdk-signer-turnkey-evm](https://github.com/G9NCUE/wdk-signer-turnkey-evm) |
 | Dfns | Dfns MPC, wallet per derived key | service | [wdk-signer-dfns-evm](https://github.com/G9NCUE/wdk-signer-dfns-evm) |
 | Openfort | Openfort TEE backend wallet | service | [wdk-signer-openfort-evm](https://github.com/G9NCUE/wdk-signer-openfort-evm) |
@@ -29,8 +32,12 @@ server/             the local signing service, Hono on 127.0.0.1:8787
 
 API keys never reach the browser: the service holds the four remote signers and answers with
 addresses and signatures only. Derivable signers (seed, Ledger, Turnkey, Dfns) show accounts 0 to 2
-at `44'/60'/0'/0/i`. Single-key signers (Openfort, Fireblocks) are registered by name with
+at `44'/60'/0'/0/i`. Single-key signers (MetaMask, Openfort, Fireblocks) are registered by name with
 `wallet.addSigner()` and show one account.
+
+MetaMask (or Rabby, Coinbase Wallet) signs messages and typed data, but never returns a signed
+transaction and does not sign EIP-7702 authorizations: "Sign tx" is greyed out for it, and "Send"
+goes through the wallet's own `eth_sendTransaction` instead of the WDK's sign-then-broadcast.
 
 ## Run
 
@@ -57,3 +64,7 @@ typed data and EIP-7702 authorizations, and prints the timing.
 - beta.18 does not export `ISignerEvm`, every external signer follows the contract by shape.
 - The Ledger kit 1.18 signs EIP-7702 authorizations (`signDelegationAuthorization`), which
   PR #89 of `wdk-wallet-evm` declared impossible in July.
+- `ISignerEvm` assumes a signer returns bytes and the WDK broadcasts. Injected wallets and the
+  Fireblocks web3 provider sign and broadcast in one step; the contract has no place for them
+  today. An optional `sendTransaction` on the signer, preferred by the account when present, is
+  what this demo does.

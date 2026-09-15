@@ -12,10 +12,21 @@ const PLACEHOLDER_SEED = 'test test test test test test test test test test test
 
 export function createWallet (signer) {
   const config = { provider: RPC_URL, chainId: CHAIN_ID }
-  if (signer.isDerivable) return { wallet: new WalletManagerEvm(signer, config), named: null }
+  if (signer.isDerivable) return { wallet: new WalletManagerEvm(signer, config), named: null, signer }
   const wallet = new WalletManagerEvm(PLACEHOLDER_SEED, config)
   wallet.addSigner('remote', signer)
-  return { wallet, named: 'remote' }
+  return { wallet, named: 'remote', signer }
+}
+
+export function shortAddress (address) {
+  return address ? `${address.slice(0, 6)}…${address.slice(-4)}` : ''
+}
+
+export function shortBalance (balance) {
+  if (balance === null || balance === undefined) return null
+  if (typeof balance !== 'string' || balance.startsWith('error')) return balance
+  const n = Number(balance)
+  return n === 0 ? '0' : n < 0.0001 ? '<0.0001' : n.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')
 }
 
 // accounts 0..2 for a derivable signer, the single account otherwise, addresses resolved
@@ -71,14 +82,18 @@ export const ACTIONS = {
     }
   },
 
-  async sendToSelf (account) {
+  // an injected wallet signs and broadcasts itself, so the send goes through the signer, not the WDK
+  async sendToSelf (account, signer) {
     const address = await account.getAddress()
-    const { hash, fee } = await account.sendTransaction({ to: address, value: 0n, data: '0x' })
+    const request = { to: address, value: 0n, data: '0x' }
+    const { hash, fee } = typeof signer?.sendTransaction === 'function'
+      ? await signer.sendTransaction(request)
+      : await account.sendTransaction(request)
     return {
       ok: true,
       text: `sent to self, ${hash}`,
       link: `${EXPLORER}/tx/${hash}`,
-      details: { address, to: address, value: 0n, hash, fee, explorer: `${EXPLORER}/tx/${hash}` }
+      details: { address, ...request, hash, fee, via: signer?.sendTransaction ? 'the wallet (eth_sendTransaction)' : 'WDK sendTransaction, eth_sendRawTransaction', explorer: `${EXPLORER}/tx/${hash}` }
     }
   }
 }
