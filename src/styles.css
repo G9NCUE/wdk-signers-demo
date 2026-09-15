@@ -224,3 +224,25 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
   .log .row { grid-template-columns: 12px 1fr; gap: 2px 8px; }
   .log .details { padding-left: 12px; }
 }
+
+/* ---- Send sheet ---------------------------------------------------------------------------------- */
+.field { display: flex; flex-direction: column; gap: 6px; margin: 12px 0 16px; }
+.field .input { display: flex; align-items: center; height: 44px; padding: 0 12px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--card); }
+.field .input:focus-within { border-color: var(--accent); }
+.field input { flex: 1; min-width: 0; border: 0; background: none; color: var(--ink); font: 600 22px/1 var(--font-mono); outline: none; }
+.field .unit { font: 600 12px/1 var(--font-mono); letter-spacing: 0.08em; color: var(--secondary); }
+.small { font-size: 12px; }
+.targets { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.target-group { display: flex; align-items: center; gap: 8px; padding: 6px 2px 4px; font-size: 13px; font-weight: 600; }
+.target-group .reason { font-size: 11px; font-weight: 400; color: var(--error); }
+.target { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 4px; padding: 8px 12px; border: 1px solid var(--line-subtle); border-radius: var(--radius-control); background: var(--card); color: var(--ink); font: 500 13px/1.25 var(--font-sans); text-align: left; }
+.target code { color: var(--secondary); font-size: 12.5px; }
+.target:hover { background: var(--card-elevated); border-color: color-mix(in srgb, var(--accent) 50%, var(--line-subtle)); }
+.target.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.target.active code { color: var(--ink); }
+.sheet-actions { display: flex; gap: 8px; margin-top: 16px; }
+.btn { flex: 1; height: 36px; padding: 0 14px; border: 1px solid var(--line); border-radius: var(--radius-btn); background: var(--surface); color: var(--ink); font-size: 14px; font-weight: 600; letter-spacing: 0.3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.btn:hover:not(:disabled) { background: var(--card-elevated); }
+.btn.primary { flex: 2; border-color: var(--accent); background: var(--accent); color: #fff; border-radius: 4px; }
+.btn.primary:hover:not(:disabled) { background: var(--accent-hover); }
+.btn:disabled { opacity: .5; }

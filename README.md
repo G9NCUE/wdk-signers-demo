@@ -3,7 +3,9 @@
 One Vite app, one `WalletManagerEvm` from `@tetherto/wdk-wallet-evm` 1.0.0-beta.18, seven signers
 behind the same `ISigner` contract. The app is drawn as a phone: a wallet home with the signer as a
 chip at the top, the balance card, the address, the accounts, and three actions: sign a message, sign
-a populated transaction offline, send 0 ETH to self. Switching signer in the bottom sheet rebuilds the
+a populated transaction offline, send ETH to another account the demo controls (the send sheet lists
+the seed accounts, the remote signers' accounts, and Ledger or MetaMask once connected; default
+0.0005 ETH, any amount above zero). Switching signer in the bottom sheet rebuilds the
 accounts and refreshes the Sepolia balances. A developer panel on the side keeps the full log, each
 entry expandable to the bytes behind it.
 

@@ -71,6 +71,28 @@ test(`${SIGNER}: sign message and sign tx succeed and land in the log with their
   }
 })
 
+test(`${SIGNER}: the send sheet lists the other demo accounts, then is cancelled, nothing sent`, async (t) => {
+  if (guard(t)) return
+  if (!(await page.$('.state-dot.ready'))) return t.skip('no signer ready')
+  const sender = await page.$eval('.tile .addr code', c => c.getAttribute('title'))
+  await page.click('.action:has-text("Send")')
+  await page.waitForSelector('.targets')
+  await page.waitForFunction(() => !/Resolving/.test(document.querySelector('.sheet')?.innerText || ''), null, { timeout: 60000 })
+  const targets = await page.$$eval('.target', ts => ts.map(t => [t.getAttribute('title'), t.closest('li').querySelector('.label').textContent]))
+  assert.ok(targets.length >= 2, 'at least the seed accounts are offered')
+  assert.ok(targets.some(([, label]) => label === 'Seed phrase'), 'the seed accounts are always there')
+  assert.ok(targets.every(([addr]) => addr.toLowerCase() !== sender.toLowerCase()), 'the sender is never a target')
+  const primary = await page.$eval('.btn.primary', b => [b.textContent, b.disabled])
+  assert.match(primary[0], /^Send 0\.0005 ETH to /)
+  assert.equal(primary[1], false)
+  await page.fill('.field input', '0.001')
+  assert.match(await page.$eval('.btn.primary', b => b.textContent), /^Send 0\.001 ETH to /)
+  const logBefore = await page.$$eval('.log li', l => l.length)
+  await page.click('.btn:has-text("Cancel")')
+  assert.equal((await page.$$('.targets')).length, 0, 'sheet closed')
+  assert.equal(await page.$$eval('.log li', l => l.length), logBefore, 'nothing was sent')
+})
+
 test('no page errors during the run', (t) => {
   if (guard(t)) return
   assert.deepEqual(errors, [])

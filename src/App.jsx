@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { BROWSER_SIGNERS, loadRemoteSigners } from './signers/catalog.js'
-import { ACTIONS, EXPLORER, balanceOf, createWallet, formatDetails, loadAccounts, loadHistory, shortAddress, shortBalance } from './lib/wallet.js'
+import { ACTIONS, EXPLORER, balanceOf, createWallet, formatDetails, loadAccounts, loadHistory, parseEther, shortAddress, shortBalance } from './lib/wallet.js'
+import { recipients, remember } from './lib/recipients.js'
 
 const DIRECTION = { in: { sign: '↓', label: 'Received' }, out: { sign: '↑', label: 'Sent' }, self: { sign: '↻', label: 'Self' } }
 
@@ -21,8 +22,12 @@ function errorDetails (e) {
 const ACTION_LIST = [
   { name: 'signMessage', label: 'Sign message', icon: '✎' },
   { name: 'signTransaction', label: 'Sign tx', icon: '⎘' },
-  { name: 'sendToSelf', label: 'Send', icon: '↑' }
+  { name: 'send', label: 'Send', icon: '↑' }
 ]
+const DEFAULT_AMOUNT = '0.0005'
+
+// "Seed phrase #1", or just the signer's name for a single-key signer
+const targetLabel = (group, account) => account.index !== undefined ? `${group.label} #${account.index}` : group.label
 
 export default function App () {
   const [signers, setSigners] = useState(BROWSER_SIGNERS)
@@ -41,6 +46,7 @@ export default function App () {
   const [copied, setCopied] = useState(false)
   const [history, setHistory] = useState(null)
   const [historyTick, setHistoryTick] = useState(0)
+  const [send, setSend] = useState(null) // { targets, loading, to, toLabel, amount }
   const walletRef = useRef(null)
   const nextId = useRef(0)
 
@@ -83,6 +89,7 @@ export default function App () {
       walletRef.current = handle
       const list = await loadAccounts(handle)
       setAccounts(list)
+      remember(entry.id, list)
       setPhase('ready')
       append({
         ok: true,
@@ -98,20 +105,37 @@ export default function App () {
     }
   }, [append, refreshBalances])
 
-  const run = useCallback(async (name) => {
+  const run = useCallback(async (name, args) => {
     const entry = accounts[current]
     if (!entry) return
     setBusy(name)
     try {
-      const result = await ACTIONS[name](entry.account, walletRef.current?.signer)
+      const result = await ACTIONS[name](entry.account, walletRef.current?.signer, args)
       append({ ...result, signer: selected.label, account: entry.index })
-      if (name === 'sendToSelf') setTimeout(() => { refreshBalances(accounts); setHistoryTick(t => t + 1) }, 15000)
+      if (name === 'send') setTimeout(() => { refreshBalances(accounts); setHistoryTick(t => t + 1) }, 15000)
     } catch (e) {
       append({ ok: false, signer: selected.label, account: entry.index, text: e.message, details: errorDetails(e) })
     } finally {
       setBusy(null)
     }
   }, [accounts, current, selected, append, refreshBalances])
+
+  // the send sheet: the other accounts the demo controls, resolved once, the current sender excluded
+  const openSend = useCallback(async () => {
+    const from = accounts[current]?.address
+    setSend({ targets: [], loading: true, to: null, toLabel: null, amount: DEFAULT_AMOUNT })
+    const targets = await recipients(signers, { exclude: from })
+    const first = targets.find(g => g.accounts.length)
+    setSend(s => s && { ...s, targets, loading: false, to: first?.accounts[0].address ?? null, toLabel: first ? targetLabel(first, first.accounts[0]) : null })
+  }, [accounts, current, signers])
+
+  const confirmSend = useCallback(async () => {
+    let value
+    try { value = parseEther(send.amount || '0') } catch { return append({ ok: false, signer: selected.label, text: `bad amount: ${send.amount}` }) }
+    const args = { to: send.to, toLabel: send.toLabel, value }
+    setSend(null)
+    await run('send', args)
+  }, [send, run, append, selected])
 
   const copy = useCallback(async (text) => {
     try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1200) } catch {}
@@ -239,7 +263,7 @@ export default function App () {
                     className='action'
                     disabled={!account || busy !== null || !allowed}
                     title={allowed ? a.label : `${selected.label} cannot ${a.label.toLowerCase()} for an application`}
-                    onClick={() => run(a.name)}
+                    onClick={() => (a.name === 'send' ? openSend() : run(a.name))}
                   >
                     <span className='glyph' aria-hidden='true'>{busy === a.name ? '…' : a.icon}</span>
                     <span>{a.label}</span>
@@ -307,6 +331,44 @@ export default function App () {
                     ))}
                   </ul>
                   {serviceError && <p className='warn'>Signer service unreachable: {serviceError}. Run <code>npm run service</code>.</p>}
+                </div>
+              </div>
+            )}
+            {send && (
+              <div className='sheet-backdrop' onClick={() => setSend(null)}>
+                <div className='sheet' role='dialog' aria-label='Send' onClick={ev => ev.stopPropagation()}>
+                  <div className='grip' />
+                  <h4 className='eyebrow'>Send from {selected.label}{account?.index !== undefined ? ` #${account.index}` : ''}</h4>
+                  <label className='field'>
+                    <span className='eyebrow'>Amount</span>
+                    <span className='input'>
+                      <input inputMode='decimal' value={send.amount} onChange={ev => setSend(s => ({ ...s, amount: ev.target.value }))} />
+                      <span className='unit'>ETH</span>
+                    </span>
+                    <span className='muted small'>balance {shortBalance(account?.balance) ?? '…'} ETH, gas on top</span>
+                  </label>
+                  <div className='eyebrow'>To, another account of this demo</div>
+                  {send.loading && <p className='muted'>Resolving the other signers' accounts…</p>}
+                  {!send.loading && !send.targets.some(g => g.accounts.length) && <p className='muted'>No other account available. Connect Ledger or MetaMask, or configure a provider.</p>}
+                  <ul className='targets'>
+                    {send.targets.map(g => (
+                      <li key={g.id}>
+                        <div className='target-group'><span className='label'>{g.label}</span><span className={`where ${g.key}`}>{g.key}</span>{g.error && <span className='reason'>{g.error}</span>}</div>
+                        {g.accounts.map(a => {
+                          const label = targetLabel(g, a)
+                          return (
+                            <button key={a.address} className={`target ${send.to === a.address ? 'active' : ''}`} onClick={() => setSend(s => ({ ...s, to: a.address, toLabel: label }))} title={a.address}>
+                              <span>{a.index !== undefined ? `#${a.index}` : 'account'}</span><code>{shortAddress(a.address)}</code>
+                            </button>
+                          )
+                        })}
+                      </li>
+                    ))}
+                  </ul>
+                  <div className='sheet-actions'>
+                    <button className='btn' onClick={() => setSend(null)}>Cancel</button>
+                    <button className='btn primary' disabled={!send.to || send.loading} onClick={confirmSend}>Send {send.amount || '0'} ETH{send.toLabel ? ` to ${send.toLabel}` : ''}</button>
+                  </div>
                 </div>
               </div>
             )}

@@ -45,6 +45,7 @@ export const BROWSER_SIGNERS = [
     kind: 'hardware, WebHID, wdk-signer-ledger-evm',
     where: 'browser',
     key: 'hardware',
+    prompts: true, // opens the device picker, never built silently
     available: typeof navigator !== 'undefined' && 'hid' in navigator,
     reason: 'WebHID is not available in this browser, use Chrome or Edge',
     isDerivable: true,
@@ -57,6 +58,7 @@ export const BROWSER_SIGNERS = [
     kind: 'injected wallet, EIP-1193, wdk-signer-eip1193-evm',
     where: 'browser',
     key: 'extension',
+    prompts: true, // opens the wallet's connect prompt, never built silently
     available: Eip1193SignerEvm.isAvailable(globalThis),
     reason: 'no injected wallet found, install MetaMask, Rabby or Coinbase Wallet',
     isDerivable: false,

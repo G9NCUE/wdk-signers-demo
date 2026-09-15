@@ -1,5 +1,7 @@
 import WalletManagerEvm from '@tetherto/wdk-wallet-evm'
-import { JsonRpcProvider, Transaction, formatEther, verifyMessage } from 'ethers'
+import { JsonRpcProvider, Transaction, formatEther, parseEther, verifyMessage } from 'ethers'
+
+export { parseEther }
 
 export const CHAIN_ID = 11155111
 export const RPC_URL = import.meta.env.VITE_SEPOLIA_RPC_URL || 'https://ethereum-sepolia-rpc.publicnode.com'
@@ -37,10 +39,10 @@ export function shortBalance (balance) {
 }
 
 // accounts 0..2 for a derivable signer, the single account otherwise, addresses resolved
-export async function loadAccounts ({ wallet, named }) {
+export async function loadAccounts ({ wallet, named }, count = ACCOUNT_COUNT) {
   const accounts = named
     ? [await wallet.getAccount(named)]
-    : await Promise.all(Array.from({ length: ACCOUNT_COUNT }, (_, i) => wallet.getAccount(i)))
+    : await Promise.all(Array.from({ length: count }, (_, i) => wallet.getAccount(i)))
   return Promise.all(accounts.map(async (account, i) => ({
     account,
     index: named ? account.index : i,
@@ -89,18 +91,21 @@ export const ACTIONS = {
     }
   },
 
-  // an injected wallet signs and broadcasts itself, so the send goes through the signer, not the WDK
-  async sendToSelf (account, signer) {
+  // a real transfer to another account the demo controls; an injected wallet signs and broadcasts
+  // itself, so the send goes through the signer, not the WDK
+  async send (account, signer, { to, value, toLabel }) {
     const address = await account.getAddress()
-    const request = { to: address, value: 0n, data: '0x' }
+    if (!(value > 0n)) throw new Error('The amount must be above zero.')
+    if (to.toLowerCase() === address.toLowerCase()) throw new Error('Pick another account than the sender.')
+    const request = { to, value, data: '0x' }
     const { hash, fee } = typeof signer?.sendTransaction === 'function'
       ? await signer.sendTransaction(request)
       : await account.sendTransaction(request)
     return {
       ok: true,
-      text: `sent to self, ${hash}`,
+      text: `sent ${formatEther(value)} ETH to ${toLabel}, ${hash}`,
       link: `${EXPLORER}/tx/${hash}`,
-      details: { address, ...request, hash, fee, via: signer?.sendTransaction ? 'the wallet (eth_sendTransaction)' : 'WDK sendTransaction, eth_sendRawTransaction', explorer: `${EXPLORER}/tx/${hash}` }
+      details: { from: address, ...request, toLabel, hash, fee, via: signer?.sendTransaction ? 'the wallet (eth_sendTransaction)' : 'WDK sendTransaction, eth_sendRawTransaction', explorer: `${EXPLORER}/tx/${hash}` }
     }
   }
 }
