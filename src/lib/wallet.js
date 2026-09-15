@@ -18,6 +18,13 @@ export function createWallet (signer) {
   return { wallet, named: 'remote', signer }
 }
 
+// history comes from the service: Blockscout for ETH, the WDK indexer for USDT
+export async function loadHistory (address, limit = 20) {
+  const res = await fetch(`/api/history/${address}?limit=${limit}`)
+  if (!res.ok) throw new Error(`history: HTTP ${res.status}`)
+  return res.json()
+}
+
 export function shortAddress (address) {
   return address ? `${address.slice(0, 6)}…${address.slice(-4)}` : ''
 }

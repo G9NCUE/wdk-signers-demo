@@ -3,10 +3,20 @@
 import { Hono } from 'hono'
 import { serve } from '@hono/node-server'
 import { buildRegistry } from './registry.js'
+import { history } from './history.js'
 import { parse, stringify } from '../src/lib/json.js'
 
 const registry = buildRegistry()
 const app = new Hono()
+
+// ETH transactions and USDT transfers of one address, newest first
+app.get('/api/history/:address', async (c) => {
+  try {
+    return c.json(await history(c.req.param('address'), { limit: Number(c.req.query('limit') || 20) }))
+  } catch (e) {
+    return c.json({ error: e.message }, 400)
+  }
+})
 
 app.get('/api/signers', (c) => {
   const list = [...registry.values()].map(({ id, label, kind, available, reason, root }) => ({
@@ -69,5 +79,6 @@ async function run (entry, signer, op, body) {
 const port = Number(process.env.SIGNER_SERVICE_PORT || 8787)
 serve({ fetch: app.fetch, port, hostname: '127.0.0.1' }, () => {
   const status = [...registry.values()].map(e => `${e.id}: ${e.available ? 'ready' : e.reason}`).join('\n  ')
-  console.log(`signer service on http://127.0.0.1:${port}\n  ${status}`)
+  const indexer = process.env.WDK_INDEXER_API_KEY ? 'key set' : 'no key, USDT history off'
+  console.log(`signer service on http://127.0.0.1:${port}\n  ${status}\n  history: Blockscout for ETH, WDK indexer for USDT (${indexer})`)
 })

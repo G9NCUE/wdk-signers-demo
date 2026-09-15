@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { BROWSER_SIGNERS, loadRemoteSigners } from './signers/catalog.js'
-import { ACTIONS, EXPLORER, balanceOf, createWallet, formatDetails, loadAccounts, shortAddress, shortBalance } from './lib/wallet.js'
+import { ACTIONS, EXPLORER, balanceOf, createWallet, formatDetails, loadAccounts, loadHistory, shortAddress, shortBalance } from './lib/wallet.js'
+
+const DIRECTION = { in: { sign: '↓', label: 'Received' }, out: { sign: '↑', label: 'Sent' }, self: { sign: '↻', label: 'Self' } }
+
+function when (iso) {
+  const d = new Date(iso)
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+}
 
 // what an error can tell beyond its message: the WDK error class, a cause, a provider's code
 function errorDetails (e) {
@@ -32,6 +39,8 @@ export default function App () {
   const [devOpen, setDevOpen] = useState(true)
   const [expanded, setExpanded] = useState(() => new Set())
   const [copied, setCopied] = useState(false)
+  const [history, setHistory] = useState(null)
+  const [historyTick, setHistoryTick] = useState(0)
   const walletRef = useRef(null)
   const nextId = useRef(0)
 
@@ -96,7 +105,7 @@ export default function App () {
     try {
       const result = await ACTIONS[name](entry.account, walletRef.current?.signer)
       append({ ...result, signer: selected.label, account: entry.index })
-      if (name === 'sendToSelf') setTimeout(() => refreshBalances(accounts), 15000)
+      if (name === 'sendToSelf') setTimeout(() => { refreshBalances(accounts); setHistoryTick(t => t + 1) }, 15000)
     } catch (e) {
       append({ ok: false, signer: selected.label, account: entry.index, text: e.message, details: errorDetails(e) })
     } finally {
@@ -110,7 +119,17 @@ export default function App () {
 
   const account = accounts[current]
   const balance = shortBalance(account?.balance)
-  const recent = log.filter(e => e.signer === selected?.label).slice(0, 4)
+
+  // history of the selected account, reloaded when the account changes and after a send
+  useEffect(() => {
+    if (!account?.address) { setHistory(null); return }
+    let alive = true
+    setHistory({ loading: true, address: account.address })
+    loadHistory(account.address)
+      .then(h => alive && setHistory(h))
+      .catch(e => alive && setHistory({ error: e.message, address: account.address, entries: [] }))
+    return () => { alive = false }
+  }, [account?.address, historyTick])
 
   return (
     <div className='page'>
@@ -198,18 +217,38 @@ export default function App () {
               </p>
             )}
 
-            <section className='activity'>
-              <h4>Activity</h4>
-              {recent.length === 0 && <p className='muted'>Nothing yet.</p>}
-              <ul>
-                {recent.map(e => (
-                  <li key={e.id} className={e.ok ? 'ok' : 'bad'}>
-                    <span className='mark' />
-                    <span className='txt'>{e.link ? <a href={e.link} target='_blank' rel='noreferrer'>{e.text}</a> : e.text}</span>
-                    <span className='when'>{e.at}</span>
-                  </li>
-                ))}
-              </ul>
+            <section className='history'>
+              <div className='history-head'>
+                <h4>History{account ? ` · #${account.index}` : ''}</h4>
+                {history && !history.loading && (
+                  <button className='link small' onClick={() => setHistoryTick(t => t + 1)}>refresh</button>
+                )}
+              </div>
+              {!account && <p className='muted'>Pick a signer to see its transactions.</p>}
+              {history?.loading && <p className='muted'>Loading…</p>}
+              {history?.error && <p className='warn'>{history.error}</p>}
+              {history && !history.loading && !history.error && history.entries.length === 0 && <p className='muted'>No transaction yet on this address.</p>}
+              {history && !history.loading && history.entries.length > 0 && (
+                <ul>
+                  {history.entries.map(e => (
+                    <li key={e.id} className={`${e.direction} ${e.status}`}>
+                      <a href={e.link} target='_blank' rel='noreferrer'>
+                        <span className={`sign ${e.direction}`}>{DIRECTION[e.direction].sign}</span>
+                        <span className='main'>
+                          <span className='what'>{DIRECTION[e.direction].label} {e.kind}{e.status === 'failed' ? ' · failed' : ''}</span>
+                          <span className='sub'>{e.counterparty ? shortAddress(e.counterparty) : e.method || 'contract'} · {when(e.timestamp)}</span>
+                        </span>
+                        <span className={`amt ${e.direction}`}>{e.direction === 'in' ? '+' : e.direction === 'out' ? '−' : ''}{shortBalance(e.amount)} {e.kind}</span>
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {history && !history.loading && history.sources && (
+                <p className='sources'>
+                  ETH via Blockscout{history.sources.blockscout !== 'ok' ? ` (${history.sources.blockscout})` : ''} · USDT via WDK indexer{history.sources.wdkIndexer !== 'ok' ? ` (${history.sources.wdkIndexer})` : ''}
+                </p>
+              )}
             </section>
 
             {sheet && (

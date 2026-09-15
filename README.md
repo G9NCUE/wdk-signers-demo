@@ -35,6 +35,13 @@ addresses and signatures only. Derivable signers (seed, Ledger, Turnkey, Dfns) s
 at `44'/60'/0'/0/i`. Single-key signers (MetaMask, Openfort, Fireblocks) are registered by name with
 `wallet.addSigner()` and show one account.
 
+The phone shows the transaction history of the selected account, merged from two sources by the
+service (`server/history.js`): native ETH transactions from Blockscout's public Sepolia API, and USDT
+transfers from the **WDK indexer** (`https://wdk-api.tether.io`, key in `WDK_INDEXER_API_KEY`, free
+registration). The WDK indexer is the WDK's own history feature, and it indexes token transfers only
+(USDT, XAUt, BTC); native ETH history is not available from it, hence Blockscout for that half.
+Without a key the ETH half still shows and the footer says so.
+
 MetaMask (or Rabby, Coinbase Wallet) signs messages and typed data, but never returns a signed
 transaction and does not sign EIP-7702 authorizations: "Sign tx" is greyed out for it, and "Send"
 goes through the wallet's own `eth_sendTransaction` instead of the WDK's sign-then-broadcast.
