@@ -61,7 +61,7 @@ export default function App () {
   }, [])
 
   const toggle = useCallback((id) => {
-    setExpanded(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+    setExpanded(s => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
   }, [])
 
   const refreshBalances = useCallback(async (list) => {
@@ -144,16 +144,19 @@ export default function App () {
   const account = accounts[current]
   const balance = shortBalance(account?.balance)
 
-  // history of the selected account, reloaded when the account changes and after a send
+  // history of the selected account, reloaded when the account changes and after a send;
+  // "loading" is derived: the history on hand is for another address, or a refresh is pending
   useEffect(() => {
-    if (!account?.address) { setHistory(null); return }
+    if (!account?.address) return
     let alive = true
-    setHistory({ loading: true, address: account.address })
     loadHistory(account.address)
-      .then(h => alive && setHistory(h))
-      .catch(e => alive && setHistory({ error: e.message, address: account.address, entries: [] }))
+      .then(h => alive && setHistory({ ...h, tick: historyTick }))
+      .catch(e => alive && setHistory({ error: e.message, address: account.address, entries: [], tick: historyTick }))
     return () => { alive = false }
   }, [account?.address, historyTick])
+  const historyView = account
+    ? (history && history.address === account.address && history.tick === historyTick ? history : { loading: true })
+    : null
 
   return (
     <div className='page'>
@@ -271,17 +274,17 @@ export default function App () {
             <section className='history'>
               <div className='history-head'>
                 <h4 className='eyebrow'>History{account?.index !== undefined ? ` · #${account.index}` : ''}</h4>
-                {history && !history.loading && (
+                {historyView && !historyView.loading && (
                   <button className='link small' onClick={() => setHistoryTick(t => t + 1)}>refresh</button>
                 )}
               </div>
               {!account && <p className='muted'>Pick a signer to see its transactions.</p>}
-              {history?.loading && <p className='muted'>Loading…</p>}
-              {history?.error && <p className='warn'>{history.error}</p>}
-              {history && !history.loading && !history.error && history.entries.length === 0 && <p className='muted'>No transaction yet on this address.</p>}
-              {history && !history.loading && history.entries.length > 0 && (
+              {historyView?.loading && <p className='muted'>Loading…</p>}
+              {historyView?.error && <p className='warn'>{historyView.error}</p>}
+              {historyView && !historyView.loading && !historyView.error && historyView.entries.length === 0 && <p className='muted'>No transaction yet on this address.</p>}
+              {historyView && !historyView.loading && historyView.entries.length > 0 && (
                 <ul>
-                  {history.entries.map(e => (
+                  {historyView.entries.map(e => (
                     <li key={e.id} className={`${e.direction} ${e.status}`}>
                       <a href={e.link} target='_blank' rel='noreferrer'>
                         <span className={`sign ${e.direction}`}>{DIRECTION[e.direction].sign}</span>
@@ -295,9 +298,9 @@ export default function App () {
                   ))}
                 </ul>
               )}
-              {history && !history.loading && history.sources && (
+              {historyView && !historyView.loading && historyView.sources && (
                 <p className='sources'>
-                  ETH via Blockscout{history.sources.blockscout !== 'ok' ? ` (${history.sources.blockscout})` : ''} · USDT via WDK indexer{history.sources.wdkIndexer !== 'ok' ? ` (${history.sources.wdkIndexer})` : ''}
+                  ETH via Blockscout{historyView.sources.blockscout !== 'ok' ? ` (${historyView.sources.blockscout})` : ''} · USDT via WDK indexer{historyView.sources.wdkIndexer !== 'ok' ? ` (${historyView.sources.wdkIndexer})` : ''}
                 </p>
               )}
             </section>
