@@ -163,9 +163,10 @@ export default function App () {
             <a className='brand' href='https://github.com/G9NCUE/wdk-atlas' aria-label='WDK Atlas'>
               <img src='/assets/wdk-logo.svg' alt='WDK' width='170' height='61' />
             </a>
-            <ul className='nav'>
-              <li><span aria-current='page'>Signers demo</span></li>
-            </ul>
+            <div className='topbar-title'>
+              <h1>WDK signers</h1>
+              <p className='subtitle'>One <code>WalletManagerEvm</code>, one <code>ISigner</code> at a time, on Sepolia. Seven signers behind the same contract.</p>
+            </div>
           </div>
           <div className='topbar-right'>
             <div className='view-toggle' role='group' aria-label='Layout'>
@@ -177,18 +178,6 @@ export default function App () {
             </a>
           </div>
         </div>
-      </header>
-
-      <header className='site-header'>
-        <div>
-          <h1>WDK signers</h1>
-          <p className='subtitle'>One <code>WalletManagerEvm</code>, one <code>ISigner</code> at a time, on Sepolia. Seven signers behind the same contract.</p>
-        </div>
-        <ul className='legend' aria-label='Status legend'>
-          <li><span className='state-dot ready' /> ready</li>
-          <li><span className='state-dot connecting' /> connecting</li>
-          <li><span className='state-dot error' /> error</li>
-        </ul>
       </header>
 
       <div className={`stage ${devOpen ? '' : 'solo'}`}>
