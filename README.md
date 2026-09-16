@@ -60,6 +60,7 @@ server/
   history.js                     Blockscout and WDK indexer, merged
   probe.js                       every signer call from Node, through the real WalletManagerEvm
   setup-openfort.mjs             one-time: creates the Openfort backend wallet, prints the .env line
+  setup-fireblocks.mjs           one-time: creates the vault account and its Sepolia asset, prints the .env line
 tests/                           see Tests
 ```
 
@@ -84,7 +85,7 @@ from any faucet for the sends.
 | Turnkey | `TURNKEY_ORGANIZATION_ID`, `TURNKEY_API_PUBLIC_KEY`, `TURNKEY_API_PRIVATE_KEY`, `TURNKEY_WALLET_ID` | app.turnkey.com, an API key and an HD wallet |
 | Dfns | `DFNS_AUTH_TOKEN`, `DFNS_CRED_ID`, `DFNS_PRIVATE_KEY_FILE`, `DFNS_MASTER_KEY_ID`, `DFNS_NETWORK` | app.dfns.io, a service account with a P-256 key and a master key |
 | Openfort | `OPENFORT_SECRET_KEY`, `OPENFORT_WALLET_SECRET`, `OPENFORT_ACCOUNT_ID` | dashboard.openfort.io, then `npx @openfort/cli backend-wallet setup`, then `node --env-file=.env server/setup-openfort.mjs` |
-| Fireblocks | `FIREBLOCKS_API_KEY`, `FIREBLOCKS_SECRET_KEY_FILE`, `FIREBLOCKS_VAULT_ACCOUNT_ID` | a sandbox workspace, an API user with the Signer role, a vault account holding `ETH_TEST5` |
+| Fireblocks | `FIREBLOCKS_API_KEY`, `FIREBLOCKS_SECRET_KEY_FILE`, `FIREBLOCKS_VAULT_ACCOUNT_ID` | a sandbox workspace; an API user with the Signer role from Developer Center → API Users (let the console generate the key pair and download the private key, or upload a CSR); then `node --env-file=.env server/setup-fireblocks.mjs` for the vault account and its `ETH_TEST5` address |
 | WDK indexer | `WDK_INDEXER_API_KEY` | wdk-api.tether.io/register, free, for the USDT half of the history |
 
 `.env.example` lists everything, including the optional endpoints. `.env` is gitignored, keep it
