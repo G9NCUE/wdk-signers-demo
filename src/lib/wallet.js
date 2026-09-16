@@ -4,7 +4,8 @@ import { JsonRpcProvider, Transaction, formatEther, parseEther, verifyMessage } 
 export { parseEther }
 
 export const CHAIN_ID = 11155111
-export const RPC_URL = import.meta.env.VITE_SEPOLIA_RPC_URL || 'https://ethereum-sepolia-rpc.publicnode.com'
+// Vite exposes VITE_ variables on import.meta.env; under Node (tests, service) it is undefined
+export const RPC_URL = import.meta.env?.VITE_SEPOLIA_RPC_URL || globalThis.process?.env?.SEPOLIA_RPC_URL || 'https://ethereum-sepolia-rpc.publicnode.com'
 export const EXPLORER = 'https://sepolia.etherscan.io'
 const ACCOUNT_COUNT = 3
 

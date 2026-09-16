@@ -5,7 +5,9 @@ import { parse, stringify } from '../lib/json.js'
 // ISignerEvm whose every operation is answered by the local Node service (server/), which holds
 // the real signer and its API keys. The browser only sees the derivation path and the results.
 export default class RemoteSignerEvm extends ISigner {
-  constructor ({ id, path, isDerivable, baseUrl = '/api' } = {}) {
+  // lifecycle is shared by reference between a root and the children it derives: disposing the
+  // root (what WalletManagerEvm.dispose does) ends every account derived from it
+  constructor ({ id, path, isDerivable, baseUrl = '/api', lifecycle } = {}) {
     super()
     this._id = id
     this._path = path
@@ -13,7 +15,7 @@ export default class RemoteSignerEvm extends ISigner {
     this._baseUrl = baseUrl
     this._address = undefined
     this._publicKey = null
-    this._disposed = false
+    this._lifecycle = lifecycle ?? { disposed: false }
   }
 
   get isDerivable () { return this._isDerivable }
@@ -25,7 +27,7 @@ export default class RemoteSignerEvm extends ISigner {
   async derive (relPath) {
     if (!this.isDerivable) throw new InvalidSignerError('Cannot derive: this signer is a derived child.')
     const child = await this._call('derive', { relPath })
-    return new RemoteSignerEvm({ id: this._id, path: child.path, isDerivable: false, baseUrl: this._baseUrl })
+    return new RemoteSignerEvm({ id: this._id, path: child.path, isDerivable: false, baseUrl: this._baseUrl, lifecycle: this._lifecycle })
   }
 
   async getAddress () {
@@ -54,12 +56,12 @@ export default class RemoteSignerEvm extends ISigner {
   }
 
   dispose () {
-    this._disposed = true
+    this._lifecycle.disposed = true
     this._publicKey = null
   }
 
   async _call (op, body = {}) {
-    if (this._disposed) throw new InvalidSignerError('The signer has been disposed.')
+    if (this._lifecycle.disposed) throw new InvalidSignerError('The signer has been disposed.')
     const res = await fetch(`${this._baseUrl}/signers/${this._id}/${op}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
