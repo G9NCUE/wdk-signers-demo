@@ -43,7 +43,7 @@ export default defineConfig({
       '@ledgerhq/signer-utils',
       'rxjs'
     ],
-    esbuildOptions: { define: { global: 'globalThis' } }
+    rolldownOptions: { define: { global: 'globalThis' } }
   },
   server: {
     proxy: { '/api': 'http://127.0.0.1:8787' }
