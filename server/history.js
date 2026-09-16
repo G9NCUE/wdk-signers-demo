@@ -11,9 +11,11 @@ const EXPLORER = 'https://sepolia.etherscan.io'
 export async function history (address, { limit = 20 } = {}) {
   const me = getAddress(address)
   const [eth, usdt] = await Promise.all([nativeFrom(me, limit), tokenFrom(me, limit)])
-  // pending transactions have no timestamp yet and go first
+  // newest first; pending transactions have no timestamp yet and go on top. ISO strings compare as
+  // plain strings, not localeCompare, whose collation puts the sentinel before digits
+  const key = (e) => e.timestamp ?? '9999'
   const entries = [...eth.entries, ...usdt.entries]
-    .sort((a, b) => (b.timestamp ?? '~').localeCompare(a.timestamp ?? '~'))
+    .sort((a, b) => (key(b) > key(a)) - (key(b) < key(a)))
     .slice(0, limit)
   return { address: me, entries, sources: { blockscout: eth.status, wdkIndexer: usdt.status } }
 }
