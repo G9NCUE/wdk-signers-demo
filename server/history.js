@@ -11,8 +11,9 @@ const EXPLORER = 'https://sepolia.etherscan.io'
 export async function history (address, { limit = 20 } = {}) {
   const me = getAddress(address)
   const [eth, usdt] = await Promise.all([nativeFrom(me, limit), tokenFrom(me, limit)])
+  // pending transactions have no timestamp yet and go first
   const entries = [...eth.entries, ...usdt.entries]
-    .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+    .sort((a, b) => (b.timestamp ?? '~').localeCompare(a.timestamp ?? '~'))
     .slice(0, limit)
   return { address: me, entries, sources: { blockscout: eth.status, wdkIndexer: usdt.status } }
 }
@@ -35,9 +36,10 @@ async function nativeFrom (me, limit) {
           direction: direction(me, from, to),
           amount: formatEther(tx.value),
           counterparty: from === me ? to : from,
-          timestamp: tx.timestamp,
-          block: tx.block_number,
-          status: tx.status === 'ok' ? 'ok' : 'failed',
+          // a transaction still in the mempool has no timestamp, no block and no status
+          timestamp: tx.timestamp ?? null,
+          block: tx.block_number ?? null,
+          status: tx.status === 'ok' ? 'ok' : tx.status ? 'failed' : 'pending',
           fee: tx.fee?.value ? formatEther(tx.fee.value) : null,
           method: tx.method,
           source: 'blockscout',

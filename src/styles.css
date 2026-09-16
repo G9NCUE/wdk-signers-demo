@@ -168,6 +168,8 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 .history li a { display: grid; grid-template-columns: 30px 1fr auto; gap: 10px; align-items: center; padding: 9px 12px; border: 1px solid var(--line-subtle); border-radius: var(--radius-control); background: var(--card); text-decoration: none; }
 .history li a:hover { background: var(--card-elevated); border-color: color-mix(in srgb, var(--accent) 50%, var(--line-subtle)); }
 .history li.failed a { opacity: .55; }
+.history li.pending a { border-style: dashed; }
+.history li.pending .sign { animation: pulse 1s infinite alternate; }
 .history .sign { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-size: 14px; background: var(--surface); color: var(--secondary); border: 1px solid var(--line-subtle); }
 .history .sign.in { color: var(--success); border-color: color-mix(in srgb, var(--success) 45%, var(--line)); }
 .history .sign.out { color: var(--error); border-color: color-mix(in srgb, var(--error) 40%, var(--line)); }

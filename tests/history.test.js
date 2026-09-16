@@ -65,6 +65,16 @@ test('limit caps the merged list', async () => {
   assert.equal(h.entries.length, 2)
 })
 
+test('a pending transaction has no timestamp yet, sorts first and is not marked failed', async () => {
+  const pending = { hash: '0xp1', from: { hash: ME }, to: { hash: OTHER }, value: '1000000000000000', timestamp: null, status: null, fee: null, block_number: null, method: null }
+  globalThis.fetch = async (url) => new Response(JSON.stringify(String(url).includes('blockscout') ? { items: [pending, ...blockscout.items] } : indexer), { status: 200 })
+  const h = await history(ME)
+  assert.equal(h.entries[0].hash, '0xp1')
+  assert.equal(h.entries[0].status, 'pending')
+  assert.equal(h.entries[0].timestamp, null)
+  assert.equal(h.entries[1].hash, '0xa1')
+})
+
 test('a bad address is rejected', async () => {
   await assert.rejects(history('0x123'), /bad address|invalid/i)
 })

@@ -289,8 +289,8 @@ export default function App () {
                       <a href={e.link} target='_blank' rel='noreferrer'>
                         <span className={`sign ${e.direction}`}>{DIRECTION[e.direction].sign}</span>
                         <span className='main'>
-                          <span className='what'>{DIRECTION[e.direction].label} {e.kind}{e.status === 'failed' ? ' · failed' : ''}</span>
-                          <span className='sub'>{e.counterparty ? shortAddress(e.counterparty) : e.method || 'contract'} · {when(e.timestamp)}</span>
+                          <span className='what'>{DIRECTION[e.direction].label} {e.kind}{e.status === 'failed' ? ' · failed' : e.status === 'pending' ? ' · pending' : ''}</span>
+                          <span className='sub'>{e.counterparty ? shortAddress(e.counterparty) : e.method || 'contract'} · {e.timestamp ? when(e.timestamp) : 'in the mempool'}</span>
                         </span>
                         <span className={`amt ${e.direction}`}>{e.direction === 'in' ? '+' : e.direction === 'out' ? '−' : ''}{shortBalance(e.amount)} {e.kind}</span>
                       </a>
