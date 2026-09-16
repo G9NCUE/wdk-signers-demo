@@ -9,10 +9,12 @@ export function createApp (registry, { log = console.error } = {}) {
 
   // ETH transactions and USDT transfers of one address, newest first
   app.get('/api/history/:address', async (c) => {
+    const address = c.req.param('address')
     try {
-      return c.json(await history(c.req.param('address'), { limit: Number(c.req.query('limit') || 20) }))
+      return c.json(await history(address, { limit: Number(c.req.query('limit') || 20) }))
     } catch (e) {
-      return c.json({ error: e.message }, 400)
+      log(`[history] ${address}: ${e.message}`)
+      return c.json({ error: e.message, address }, 400)
     }
   })
 
