@@ -10,7 +10,7 @@ import SafeOwnerAccount from '../lib/safe/owner-account.js'
 import { predictSafeAddress, safeConfigOf } from '../lib/safe/config.js'
 import { proposerSignatureOf } from '../lib/safe/local-coordinator.js'
 import { balancesOf, userOperationReceipt } from '../lib/safe/balances.js'
-import { createWallet, gaslessOf, loadAccounts, shortAddress, shortBalance } from '../lib/wallet.js'
+import { createWallet, formatDetails, gaslessOf, loadAccounts, loadHistory, shortAddress, shortBalance } from '../lib/wallet.js'
 import { recipients, remember } from '../lib/recipients.js'
 import { errorDetails, when } from '../lib/ui.js'
 import { CONFIGS, DEFAULT_CONFIG } from '../lib/safe/configs.js'
@@ -52,6 +52,8 @@ export default function Multisig ({ signers, net, append, serviceError }) {
   const safeError = loaded.scope === scope ? loaded.error : null
   const [balanceOf, setBalanceOf] = useState({ address: null, value: null })
   const balances = safe && balanceOf.address === safe.address ? balanceOf.value : null
+  const [chainOf, setChainOf] = useState({ address: null, value: null }) // the Safe's transfers, from the explorer
+  const chain = safe && chainOf.address === safe.address ? chainOf.value : null
   const [selectedId, setSelectedId] = useState(null)
   const [ownersOn, setOwnersOn] = useState({ net: null, map: {} }) // "signer:index" -> { phase, address, error }
   const owners = useMemo(() => (ownersOn.net === net.id ? ownersOn.map : {}), [ownersOn, net.id])
@@ -96,10 +98,13 @@ export default function Multisig ({ signers, net, append, serviceError }) {
     }
   }, [coordinator, scope, setLoaded, setSelectedId])
 
+  // balances from the chain, and the Safe's transfers as the explorer sees them (what happened on
+  // chain, including what this page did not do, like the first run from Node)
   const refreshBalances = useCallback(async (address) => {
     if (!address) return
     try { setBalanceOf({ address, value: await balancesOf(address, net) }) } catch (e) { setBalanceOf({ address, value: { error: e.message } }) }
-  }, [net, setBalanceOf])
+    try { setChainOf({ address, value: await loadHistory(address, 12, net.id) }) } catch (e) { setChainOf({ address, value: { error: e.message, entries: [] } }) }
+  }, [net, setBalanceOf, setChainOf])
 
   const refreshProposals = useCallback(async () => {
     const list = await coordinator.listProposals()
@@ -558,6 +563,64 @@ export default function Multisig ({ signers, net, append, serviceError }) {
         </section>
       )}
 
+      {/* 4. the selected proposal, in full: every signature, the execution, the user operation */}
+      {safe && selected && (
+        <section className='tile detail'>
+          <div className='history-head'>
+            <h4 className='eyebrow'>Proposal · {short(selected.proposalId, 12)}</h4>
+            <span className={`status-pill ${selected.status === 'executed' ? 'ok' : selected.status === 'ready' ? 'warn' : 'plain'}`}>{selected.status}</span>
+          </div>
+          <div className='detail-summary'>
+            <span className='what'>{selected.meta ? `${selected.meta.amount} ${selected.meta.asset}` : 'custom operation'}</span>
+            {selected.meta?.recipient && <span className='muted'>to {selected.meta.toLabel ? `${selected.meta.toLabel} ` : ''}<code title={selected.meta.recipient}>{shortAddress(selected.meta.recipient)}</code></span>}
+            <span className='muted'>from the Safe <code>{shortAddress(safe.address)}</code></span>
+          </div>
+          <ol className='timeline'>
+            {selected.confirmations.map((c, i) => (
+              <li key={c.owner} className='tl-item done'>
+                <span className='tl-dot' />
+                <div className='tl-body'>
+                  <div className='tl-title'>{i === 0 ? 'Proposed' : 'Approved'} by {custodyPill(c, c.owner)}<span className='muted small'>{when(c.at)}</span></div>
+                  <div className='tl-meta'>{SIGNS[c.signerId] ?? 'signed the SafeOp'} · signature {i + 1} of {safe.threshold}</div>
+                  <details className='tl-raw'><summary>signature</summary><code>{c.signature}</code></details>
+                </div>
+              </li>
+            ))}
+            {selected.confirmations.length < safe.threshold && !selected.execution && (
+              <li className='tl-item'>
+                <span className='tl-dot' />
+                <div className='tl-body'><div className='tl-title muted'>Waiting for {safe.threshold - selected.confirmations.length} more signature{safe.threshold - selected.confirmations.length > 1 ? 's' : ''}</div></div>
+              </li>
+            )}
+            {selected.execution
+              ? (
+                <li className='tl-item done'>
+                  <span className='tl-dot' />
+                  <div className='tl-body'>
+                    <div className='tl-title'>Executed by {custodyPill(selected.execution.by, 'exec')}<span className='muted small'>{when(selected.execution.at)}</span></div>
+                    <div className='tl-meta'>user operation sent to the bundler{selected.execution.txHash ? `, ${selected.execution.success === false ? 'reverted' : 'mined'} in block ${selected.execution.blockNumber ? Number(selected.execution.blockNumber) : '…'}` : ', receipt pending'}</div>
+                    <div className='step-links'>
+                      <a className='mini' href={`${net.blockscout}/op/${selected.execution.hash}`} target='_blank' rel='noreferrer'>user op {short(selected.execution.hash, 8)}</a>
+                      {selected.execution.txHash && <a className='mini' href={`${net.explorer}/tx/${selected.execution.txHash}`} target='_blank' rel='noreferrer'>tx {short(selected.execution.txHash, 8)}</a>}
+                    </div>
+                    <div className='tl-meta'>fee taken in {token.symbol} by the paymaster {shortAddress(net.safe.paymasterAddress)}, visible on the tx; the module's own figure ({selected.execution.moduleMaxGasCost}) is a max gas cost, not {token.symbol}</div>
+                  </div>
+                </li>
+                )
+              : selected.confirmations.length >= safe.threshold && (
+                <li className='tl-item'>
+                  <span className='tl-dot' />
+                  <div className='tl-body'><div className='tl-title muted'>Ready: any owner can execute</div></div>
+                </li>
+              )}
+          </ol>
+          <details className='tl-raw wide'>
+            <summary>User operation, as signed and stored by the coordinator</summary>
+            <pre className='details'>{formatDetails({ safeAddress: selected.safeAddress, entryPoint: selected.entryPoint, moduleAddress: selected.moduleAddress, options: selected.options, userOperation: selected.userOperation })}</pre>
+          </details>
+        </section>
+      )}
+
       {/* 4. proposals */}
       {safe && (
         <section className='proposals'>
@@ -580,6 +643,35 @@ export default function Multisig ({ signers, net, append, serviceError }) {
               </li>
             ))}
           </ul>
+        </section>
+      )}
+
+      {/* 5. on chain: the Safe's transfers as the explorer sees them */}
+      {safe && (
+        <section className='proposals onchain'>
+          <div className='history-head'>
+            <h4 className='eyebrow'>On chain · {token.symbol} and {net.native} movements of the Safe</h4>
+            <a className='link small' href={`${net.explorer}/address/${safe.address}#tokentxns`} target='_blank' rel='noreferrer'>explorer</a>
+          </div>
+          {!chain && <p className='muted'>Loading…</p>}
+          {chain?.error && <p className='warn'>{chain.error}</p>}
+          {chain && !chain.error && chain.entries.length === 0 && <p className='muted'>Nothing yet: the address exists only on paper until the first execution.</p>}
+          {chain && chain.entries.length > 0 && (
+            <ul className='chain'>
+              {chain.entries.map(e => (
+                <li key={e.id} className={`${e.direction} ${e.status}`}>
+                  <a href={e.link} target='_blank' rel='noreferrer'>
+                    <span className={`sign ${e.direction}`}>{e.direction === 'in' ? '↓' : e.direction === 'out' ? '↑' : '↻'}</span>
+                    <span className='main'>
+                      <span className='what'>{e.direction === 'in' ? 'Received' : e.direction === 'out' ? 'Sent' : 'Self'} {e.kind}{e.status === 'failed' ? ' · failed' : e.status === 'pending' ? ' · pending' : ''}{e.counterparty?.toLowerCase() === net.safe.paymasterAddress.toLowerCase() ? ' · paymaster fee' : ''}</span>
+                      <span className='sub'>{e.counterparty ? shortAddress(e.counterparty) : e.method || 'contract'} · {e.timestamp ? when(e.timestamp) : 'in the mempool'}</span>
+                    </span>
+                    <span className={`amt ${e.direction}`}>{e.direction === 'in' ? '+' : e.direction === 'out' ? '−' : ''}{shortBalance(e.amount)} {e.kind}</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       )}
 
