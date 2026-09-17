@@ -134,6 +134,14 @@ export default function App () {
     }
   }, [append, refreshBalances, net])
 
+  // the page opens on the seed signer, the one that is always there, rather than on an empty phone
+  const booted = useRef(false)
+  useEffect(() => {
+    if (booted.current) return
+    booted.current = true
+    select(BROWSER_SIGNERS.find(s => s.id === 'seed'))
+  }, [select])
+
   // switching network keeps the signer and rebuilds the wallet on the other chain
   const switchNetwork = useCallback(async (id) => {
     setNetworkId(id)
