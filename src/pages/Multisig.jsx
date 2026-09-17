@@ -445,7 +445,7 @@ export default function Multisig ({ signers, net, append, serviceError }) {
               <div className='tile-value' title={held ?? ''}>{balances ? (shortBalance(held) ?? '—') : <span className='skeleton' />}{balances && <span className='unit'>{token.symbol}</span>}</div>
               <div className='tokens'><span className='token'><b>{shortBalance(balances?.native) ?? '…'}</b> {net.native}, none needed</span>{balances?.error && <span className='token'>{balances.error}</span>}</div>
               <div className='banner-actions'>
-                <button className='btn' onClick={() => setFund({ amount: '0.5' })} disabled={busy !== null}>Fund from seed #0</button>
+                <button className='btn' onClick={() => setFund({ amount: '0.25' })} disabled={busy !== null}>Fund from seed #0</button>
                 <button className='btn primary' onClick={() => openTransfer()} disabled={busy !== null}>New transfer</button>
               </div>
               <button className='link small' onClick={forget}>Forget this Safe</button>
