@@ -15,7 +15,7 @@ executed by three different owners.
 | Signer | Key custody | Runs in | Package | Live check |
 |---|---|---|---|---|
 | Seed phrase | `VITE_DEMO_SEED_PHRASE` in `.env`, else a throwaway per browser origin | browser | `@tetherto/wdk-wallet-evm/signers` | yes |
-| Ledger | the device, WebHID | browser | [wdk-signer-ledger-evm](https://github.com/G9NCUE/wdk-signer-ledger-evm) | offline tests, device pending |
+| Ledger | the device, WebHID | browser | [wdk-signer-ledger-evm](https://github.com/G9NCUE/wdk-signer-ledger-evm) | offline tests, device pending; signs EIP-7702 authorizations with the Ethereum kit 1.18 |
 | MetaMask | the extension, EIP-1193 | browser | [wdk-signer-eip1193-evm](https://github.com/G9NCUE/wdk-signer-eip1193-evm) | connected, see limits |
 | Turnkey | Turnkey HD wallet, policies | service | [wdk-signer-turnkey-evm](https://github.com/G9NCUE/wdk-signer-turnkey-evm) | yes on Sepolia (2026-09-10); free-plan signing quota exhausted since |
 | Dfns | Dfns MPC, one wallet per network on a derived key | service | [wdk-signer-dfns-evm](https://github.com/G9NCUE/wdk-signer-dfns-evm) | yes, both networks, gasless USDT0 on Arbitrum |
@@ -177,45 +177,24 @@ npm run test:browser  # the phone in Chrome (Playwright, `chrome` channel) with 
 Ledger and MetaMask need a device or an extension in a headed browser and stay manual.
 `node server/probe.js [id]` runs the four signatures of a remote signer from the terminal with timings.
 
-## Findings on the WDK contract, from building this
+## Findings, filed upstream
 
-- `account.signTransaction(tx)` hands the request to the signer as is; only `sendTransaction`
-  populates nonce, fees and chain. Turnkey refuses an unpopulated transaction, the seed signer
-  signs it with chain id 0. The demo populates before signing.
-- `WalletManager.dispose()` disposes an account only when `keyPair.privateKey` is set. External
-  signers report `null`, so their derived accounts outlive `dispose()`. The packages here share a
-  lifecycle between a root and its children so the root's dispose ends them.
-- `ISignerEvm` assumes a signer returns bytes and the WDK broadcasts. Injected wallets sign and
-  broadcast in one step; the contract has no place for them today.
-- beta.18 does not export `ISignerEvm`; the `fix/universal-signer` branch does, and reports paths
-  with the `m/` prefix, which the packages here follow.
-- The Ledger Ethereum kit 1.18 signs EIP-7702 authorizations (`signDelegationAuthorization`), which
-  PR #89 of `wdk-wallet-evm` declared impossible in July.
-- `wdk-wallet-evm-7702-gasless` signs the user operation as EIP-712 data whose message holds BigInt
-  values; a signer that forwards typed data to an API must make it JSON-safe first (Dfns' SDK throws on
-  a BigInt). The Dfns and Ledger packages now pass it through `TypedDataEncoder.getPayload`. Filed as
-  [issue #42](https://github.com/tetherto/wdk-wallet-evm-7702-gasless/issues/42) with the question of who should normalise.
-- `wdk-wallet-evm-erc-4337` reads the seed's private key, so only the seed signer can use it;
-  `wdk-wallet-evm-7702-gasless` wraps any account and needs `signAuthorization` only, so every signer
-  here but MetaMask can go gasless. It pins `wdk-wallet-evm` beta.17 and checks `instanceof`, hence
-  the npm `overrides` in `package.json`.
-- Candide's public Arbitrum bundler rejects EntryPoint v0.8 user operations at `eth_sendUserOperation`
-  with a garbled `-32500` (the error text is the EntryPoint's bytecode), while estimation and the
-  paymaster quote pass; the same operation on EntryPoint v0.9 goes through. The demo uses v0.9.
-- `wdk-protocol-multisig-safe`'s `WalletAccountMultisigEvmSafe4337(seed, path, config)` builds its
-  owner from a seed, although it only calls `getAddress`, `signTypedData`, `keyPair`, `index`, `path`
-  and, to deploy, `sendTransaction` on it. The shim in `src/lib/safe/owner-account.js` swaps the owner
-  for any `WalletAccountEvm`; with it, a Dfns key and an Openfort wallet co-own a Safe with the seed
-  and never learn they are signing for a Safe (verified 2026-09-17 on Arbitrum One, Safe
-  `0xb38Be8c9814157E19c38Ff8AEc57101108dccf5f`). Also: `executeProposal().fee` is the module's max gas
-  cost, not an amount in the paymaster token; the package needs `wdk-wallet` beta.19 while its
-  neighbours pin beta.17 (npm override); and the bundler cannot estimate an empty Safe, it must be
-  funded first.
-- The Safe module fetches the paymaster data at `propose` time and signs it into the SafeOp. With a
-  signing paymaster (Candide's token paymaster: `validUntil` three minutes ahead) a proposal not
-  executed within the window is dead, and the sponsorship cannot be refreshed without invalidating the
-  owners' signatures. Structural to ERC-4337 with a verifying paymaster; days-long multisigs need the
-  Safe to pay its own gas or a non-signing ERC-20 paymaster.
+Building this surfaced a few things in the WDK. The ones that matter are filed; the demo carries a
+workaround for each until they move.
+
+| Finding | Workaround here | Issue |
+|---|---|---|
+| The Safe module only takes a seed as owner, although it only needs an account | `src/lib/safe/owner-account.js` swaps the owner | [multisig-safe #25](https://github.com/tetherto/wdk-protocol-multisig-safe/issues/25) |
+| A Safe proposal dies once the paymaster's sponsorship expires, three minutes with Candide, because the owners' signatures cover it | countdown, `expired` status, re-propose | [multisig-safe #26](https://github.com/tetherto/wdk-protocol-multisig-safe/issues/26) |
+| The 7702 module's typed data carries BigInt values, which a signer behind an API has to make JSON-safe | done in the Dfns and Ledger packages | [7702-gasless #42](https://github.com/tetherto/wdk-wallet-evm-7702-gasless/issues/42) |
+| The 7702 module pins `wdk-wallet-evm` beta.17 and checks `instanceof`, so a beta.18 account is not recognised | npm `overrides` in `package.json` | [7702-gasless #43](https://github.com/tetherto/wdk-wallet-evm-7702-gasless/issues/43) |
+| Candide's public Arbitrum bundler rejects EntryPoint v0.8 sends, v0.9 goes through | v0.9 in `src/lib/networks.js` | [7702-gasless #44](https://github.com/tetherto/wdk-wallet-evm-7702-gasless/issues/44) |
+| `WalletManager.dispose()` skips accounts without a private key, so an external signer's accounts keep signing | a lifecycle shared by a root signer and its children | [wdk-wallet #73](https://github.com/tetherto/wdk-wallet/issues/73) |
+
+Two more, not filed, that shape the demo: `account.signTransaction()` hands the request to the
+signer unpopulated (Turnkey refuses it, the seed signs it with chain id 0), so the demo populates
+nonce, fees and chain first; and `wdk-wallet-evm-erc-4337` reads the seed's private key, so gasless
+here goes through `wdk-wallet-evm-7702-gasless`, which wraps any account.
 
 ## Design
 
