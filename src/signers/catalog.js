@@ -12,8 +12,14 @@ const FULL = { signTransaction: true, signAuthorization: true }
 
 const MNEMONIC_KEY = 'wdk-signers-demo.mnemonic'
 
-// Sepolia only. The phrase stays in this browser's localStorage, it is a throwaway.
+// The demo seed: VITE_DEMO_SEED_PHRASE from .env when set (one seed whatever the port serving the
+// app), otherwise a throwaway generated once per browser origin and kept in localStorage.
+const ENV_SEED = (import.meta.env?.VITE_DEMO_SEED_PHRASE || '').trim().replace(/\s+/g, ' ')
+if (ENV_SEED && !Mnemonic.isValidMnemonic(ENV_SEED)) throw new Error('VITE_DEMO_SEED_PHRASE in .env is not a valid BIP-39 phrase')
+export const SEED_SOURCE = ENV_SEED ? '.env' : 'this browser'
+
 function localMnemonic () {
+  if (ENV_SEED) return ENV_SEED
   try {
     let phrase = localStorage.getItem(MNEMONIC_KEY)
     if (!phrase) {
@@ -30,7 +36,7 @@ export const BROWSER_SIGNERS = [
   {
     id: 'seed',
     label: 'Seed phrase',
-    kind: 'in the browser, WDK SeedSignerEvm',
+    kind: `seed from ${SEED_SOURCE}, WDK SeedSignerEvm`,
     where: 'browser',
     key: 'local',
     networks: ['sepolia', 'arbitrum'],

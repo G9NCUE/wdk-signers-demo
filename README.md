@@ -12,7 +12,7 @@ demo controls. A developer panel keeps every call with the bytes behind it.
 
 | Signer | Key custody | Runs in | Package | Live check |
 |---|---|---|---|---|
-| Seed phrase | this browser, localStorage, throwaway | browser | `@tetherto/wdk-wallet-evm/signers` | yes |
+| Seed phrase | `VITE_DEMO_SEED_PHRASE` in `.env`, else a throwaway per browser origin | browser | `@tetherto/wdk-wallet-evm/signers` | yes |
 | Ledger | the device, WebHID | browser | [wdk-signer-ledger-evm](https://github.com/G9NCUE/wdk-signer-ledger-evm) | offline tests, device pending |
 | MetaMask | the extension, EIP-1193 | browser | [wdk-signer-eip1193-evm](https://github.com/G9NCUE/wdk-signer-eip1193-evm) | connected, see limits |
 | Turnkey | Turnkey HD wallet, policies | service | [wdk-signer-turnkey-evm](https://github.com/G9NCUE/wdk-signer-turnkey-evm) | yes |
@@ -146,5 +146,6 @@ Font License, see the LICENSE.md there), 10 px cards on 1 px lines, mono upperca
 ## Status
 
 A prototype for the WDK "Abstract signer" work. It runs on Arbitrum One by default with real USDT0,
-so the seed phrase kept in the browser is a hot key: keep small amounts on it. It tests a contract,
+so the demo seed (from `.env`, or generated per browser origin) is a hot key held by the page: keep small
+amounts on it, and note that a `VITE_` variable is shipped to the browser bundle. It tests a contract,
 it does not custody funds. Apache-2.0.
