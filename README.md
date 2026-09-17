@@ -64,7 +64,8 @@ as Dfns #0", "Approve as Openfort", so each signature is visibly one signer's. E
 opens on what its provider received (EIP-712 typed data for Dfns, a 32-byte digest for Openfort, the
 local key for the seed), the SafeOp hash and the signature. The Safe pays its gas in USDT0 through
 Candide's token paymaster (EntryPoint v0.6): no ETH anywhere, and the deployment rides in the first
-executed operation. Arbitrum One only.
+executed operation. Arbitrum One only. A transfer is USDT0 only, to one of the owners or to any
+address; the sheet's "initiator" is the owner who signs first, the Safe itself is the sender.
 
 ![The Multisig page: the Multi-signer Safe, its three owners, the flow line](docs/multisig.png)
 
