@@ -383,12 +383,13 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
   const selected = proposals.find(p => p.proposalId === selectedId) ?? null
   const token = net.safe?.paymasterToken
   const held = balances?.tokens?.find(t => t.symbol === token?.symbol)?.balance
+  // the owners only carry a role while a proposal is in flight; once executed they are idle again
+  const active = selected && !selected.execution ? selected : null
   const roleOf = (o) => {
-    if (!selected) return null
+    if (!active) return null
     return {
-      proposer: sameOwner(selected.proposedBy, o),
-      confirmed: selected.confirmations.some(c => sameOwner(c, o)),
-      executed: sameOwner(selected.execution?.by, o)
+      proposer: sameOwner(active.proposedBy, o),
+      confirmed: active.confirmations.some(c => sameOwner(c, o))
     }
   }
   const custodyPill = (o, key) => <span key={key} className={`custody ${custodyOf(o.signerId)}`} title={o.owner ?? o.address}>{nameOf(o)}</span>
@@ -557,9 +558,9 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
           const role = roleOf(o)
           const entry = byId(o.signerId)
           const onNet = entry?.available && entry.networks?.includes(net.id)
-          const mine = selected?.confirmations.find(c => sameOwner(c, o))
-          const canApprove = safe && selected && !selected.execution && !role?.confirmed && selected.confirmations.length < safe.threshold
-          const canExecute = safe && selected && !selected.execution && selected.confirmations.length >= safe.threshold
+          const mine = active?.confirmations.find(c => sameOwner(c, o))
+          const canApprove = safe && active && !role?.confirmed && active.confirmations.length < safe.threshold
+          const canExecute = safe && active && active.confirmations.length >= safe.threshold
           const isBusy = busy && sameOwner(busy.owner, o)
           const status = !safe
             ? 'preview'
@@ -571,9 +572,7 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
                   ? 'error'
                   : !onNet
                     ? `not on ${net.label}`
-                    : role?.executed
-                      ? 'executed'
-                      : role?.proposer
+                    : role?.proposer
                         ? 'proposed'
                         : role?.confirmed
                           ? 'approved'
@@ -583,7 +582,7 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
                               ? 'can execute'
                               : entry?.prompts && state?.phase !== 'ready' ? 'connect to sign' : 'idle'
           return (
-            <article key={key} className={`tile owner ${role?.confirmed || role?.executed ? 'signed' : ''} ${isBusy ? 'busy' : ''}`}>
+            <article key={key} className={`tile owner ${role?.confirmed ? 'signed' : ''} ${isBusy ? 'busy' : ''}`}>
               <div className='owner-head'>
                 <span className='label'>{nameOf(o)}</span>
                 <span className={`custody ${custodyOf(o.signerId)}`}>{custodyOf(o.signerId)}</span>
@@ -600,16 +599,15 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
                 <details className='signed-block'>
                   <summary>Signed the SafeOp · {when(mine.at)}</summary>
                   <div className='signed-what'>{SIGNS[o.signerId]}</div>
-                  <div className='mono'>hash {short(selected.proposalId, 12)}</div>
+                  <div className='mono'>hash {short(active.proposalId, 12)}</div>
                   <div className='mono'>sig {short(mine.signature, 12)}</div>
                 </details>
               )}
-              {role?.executed && <div className='signed-what'>sent the user operation {short(selected.execution.hash)}</div>}
               {safe && (
                 <div className='owner-actions'>
-                  {(!selected || selected.execution) && <button className='btn' disabled={busy !== null || !onNet} onClick={() => openTransfer(o)}>Propose as {nameOf(o)}</button>}
-                  {canApprove && <button className='btn primary' disabled={busy !== null || !onNet} onClick={() => approve(selected.proposalId, o)}>Approve as {nameOf(o)}</button>}
-                  {canExecute && <button className='btn primary' disabled={busy !== null || !onNet} onClick={() => execute(selected.proposalId, o)}>Execute as {nameOf(o)}</button>}
+                  {!active && <button className='btn' disabled={busy !== null || !onNet} onClick={() => openTransfer(o)}>Propose as {nameOf(o)}</button>}
+                  {canApprove && <button className='btn primary' disabled={busy !== null || !onNet} onClick={() => approve(active.proposalId, o)}>Approve as {nameOf(o)}</button>}
+                  {canExecute && <button className='btn primary' disabled={busy !== null || !onNet} onClick={() => execute(active.proposalId, o)}>Execute as {nameOf(o)}</button>}
                 </div>
               )}
             </article>
