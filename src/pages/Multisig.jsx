@@ -425,11 +425,8 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
   const detailOf = (p) => (
     <div className='detail'>
       <div className='history-head'>
-        <h4 className='eyebrow'>Proposal · {short(p.proposalId, 12)}</h4>
-        <span className='detail-tools'>
-          <span className={`status-pill ${p.status === 'executed' ? 'ok' : p.status === 'ready' ? 'warn' : 'plain'}`}>{p.status}</span>
-          {p.execution && <button className='link small' onClick={() => setOpened(null)}>hide</button>}
-        </span>
+        <h4 className='eyebrow'>Trail of {short(p.proposalId, 12)}</h4>
+        {p.execution && <button className='link small' onClick={() => setOpened(null)}>hide</button>}
       </div>
       <div className='detail-summary'>
         <span className='what'>{p.meta ? `${p.meta.amount} ${p.meta.asset}` : 'custom operation'}</span>
