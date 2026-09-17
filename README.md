@@ -4,7 +4,9 @@ One wallet, seven ways to hold the key. A Vite app on the [Tether WDK](https://g
 where a single `WalletManagerEvm` runs on one `ISigner` at a time: a seed phrase, a Ledger, MetaMask,
 Turnkey, Dfns, Openfort or Fireblocks. Pick a signer, the phone shows its accounts, balances and
 history on Arbitrum One (or Sepolia behind the testnet toggle); sign a message, sign a transaction offline, or send ETH to another account the
-demo controls. A developer panel keeps every call with the bytes behind it.
+demo controls. A developer panel keeps every call with the bytes behind it. A second page, **WDK
+Multisig**, puts the same signers behind a Safe 2-of-3 and shows a transaction proposed, approved and
+executed by three different owners.
 
 ![The demo: the phone with a Dfns account selected, the log open beside it](docs/demo.png)
 
@@ -44,6 +46,37 @@ data but never returns a signed transaction: it only knows `eth_sendTransaction`
 broadcasts itself. So "Sign tx" is greyed out for it and "Send" goes through the wallet's own path,
 outside the WDK's sign-then-broadcast. Fee control, the failover provider and EIP-7702 do not apply.
 
+## Multisig
+
+The **WDK Multisig** tab (top bar) drives a [Safe](https://safe.global) 2-of-3 through the WDK's
+`wdk-protocol-multisig-safe` module, with the owners taken from the same signer catalogue. A
+**Configuration** dropdown switches between two Safes, to show that only the owners change:
+
+| Configuration | Owners | What it shows |
+|---|---|---|
+| Seed only | seed #0, #1, #2 | the plain 2-of-3 on one key source |
+| Multi-signer | seed #0, Dfns #0, Openfort | three custody models on one Safe: a page key, an MPC key behind an API, a TEE wallet behind an API |
+
+The page shows the Safe (address, deployed or not, USDT0 and ETH balances), the three owners side by
+side with their custody badge, and the path of the selected proposal: **proposed** by one owner,
+**approved** until the threshold, **executed** by any. The action sits on the owner's card, "Propose
+as Dfns #0", "Approve as Openfort", so each signature is visibly one signer's. Each card that signed
+opens on what its provider received (EIP-712 typed data for Dfns, a 32-byte digest for Openfort, the
+local key for the seed), the SafeOp hash and the signature. The Safe pays its gas in USDT0 through
+Candide's token paymaster (EntryPoint v0.6): no ETH anywhere, and the deployment rides in the first
+executed operation. Arbitrum One only.
+
+![The Multisig page: the Multi-signer Safe, its three owners, the flow line](docs/multisig.png)
+
+Behind it: `src/lib/safe/owner-account.js` puts any `WalletAccountEvm`, hence any `ISigner`, in the
+module's owner seat (the module's constructor only takes a seed, see Findings);
+`src/lib/safe/remote-coordinator.js` is the module's `IMultisigCoordinator` over the local service,
+which keeps one Safe and its proposals per network and configuration in `.safe/<network>.<config>.json`
+(gitignored), recovers each owner from its signature and needs no key; there is no Safe Transaction
+Service. `SAFE_DIR` moves the directory. Setting a Safe up sends nothing: pick owners (any seed
+account, account 0 of the others, Ledger and MetaMask once connected), a threshold, an optional salt
+to reproduce a known Safe, and the counterfactual address is computed in the page.
+
 ## How it is built
 
 ```
@@ -63,15 +96,21 @@ the WDK indexer has no native-coin history.
 
 ```
 src/
-  App.jsx                        the phone, the picker and send sheets, the developer log
+  App.jsx                        the two tabs, the phone, the picker and send sheets
+  pages/Multisig.jsx             the Safe page: configuration, owners, flow, proposals, sheets
+  components/Log.jsx             the developer log, shared by both pages
   signers/catalog.js             the seven signers, browser ones built in place
   signers/remote-signer-evm.js   ISigner whose calls go to the service
   lib/wallet.js                  WalletManagerEvm per signer, accounts, balances, the three actions, the 7702 gasless route
-  lib/networks.js                Sepolia and Arbitrum: RPC, explorer, history sources, tokens, gasless config
+  lib/networks.js                Sepolia and Arbitrum: RPC, explorer, history sources, tokens, gasless and Safe config
   lib/recipients.js              the other demo accounts, as send targets
+  lib/safe/                      owner shim, configs, module config and address prediction, remote and local coordinators, balances
 server/
   registry.js                    one root signer per provider, built from .env
   app.js                         the routes; index.js is the listener
+  safe.js                        the Safe routes: one Safe per network and configuration, proposals, confirmations, executions
+  safe/store.js                  the JSON file behind each Safe
+  safe-spike.mjs                 the first end-to-end run of the Safe from Node (seed, Dfns, Openfort), kept as a record
   history.js                     Blockscout and WDK indexer, merged
   probe.js                       every signer call from Node, through the real WalletManagerEvm
   setup-openfort.mjs             one-time: creates the Openfort backend wallet, prints the .env line
@@ -112,7 +151,9 @@ Three layers, nothing is ever broadcast:
 
 ```
 npm test              # offline: bigint JSON, the HTTP signer protocol through the real WalletManagerEvm
-                      # on the WDK's own signers, the history merge on stubbed replies, dispose ownership
+                      # on the WDK's own signers, the history merge on stubbed replies, dispose ownership,
+                      # the Safe service (two configurations, owners recovered from signatures, execution
+                      # recorded) and the owner shim on a remote account
 npm run test:live     # every provider configured in .env, on every network it supports, service
                       # in-process: balances (ETH and USDT0), a transaction populated from the chain and
                       # signed, message, typed data, and on Arbitrum a gasless quote when the account holds
@@ -120,7 +161,8 @@ npm run test:live     # every provider configured in .env, on every network it s
                       # LIVE_NETWORKS=arbitrum narrows it
 npm run test:browser  # the phone in Chrome (Playwright, `chrome` channel) with `npm run dev` up:
                       # picker, accounts, balances, history, sign message, sign tx, the send sheet
-                      # cancelled, the switch to Arbitrum and back; DEMO_SIGNER=Openfort picks another signer
+                      # cancelled, the switch to Arbitrum and back; DEMO_SIGNER=Openfort picks another signer;
+                      # and the Multisig page: tab, configurations, owner cards, flow, setup sheet cancelled
 ```
 
 Ledger and MetaMask need a device or an extension in a headed browser and stay manual.
@@ -151,6 +193,15 @@ Ledger and MetaMask need a device or an extension in a headed browser and stay m
 - Candide's public Arbitrum bundler rejects EntryPoint v0.8 user operations at `eth_sendUserOperation`
   with a garbled `-32500` (the error text is the EntryPoint's bytecode), while estimation and the
   paymaster quote pass; the same operation on EntryPoint v0.9 goes through. The demo uses v0.9.
+- `wdk-protocol-multisig-safe`'s `WalletAccountMultisigEvmSafe4337(seed, path, config)` builds its
+  owner from a seed, although it only calls `getAddress`, `signTypedData`, `keyPair`, `index`, `path`
+  and, to deploy, `sendTransaction` on it. The shim in `src/lib/safe/owner-account.js` swaps the owner
+  for any `WalletAccountEvm`; with it, a Dfns key and an Openfort wallet co-own a Safe with the seed
+  and never learn they are signing for a Safe (verified 2026-09-17 on Arbitrum One, Safe
+  `0xb38Be8c9814157E19c38Ff8AEc57101108dccf5f`). Also: `executeProposal().fee` is the module's max gas
+  cost, not an amount in the paymaster token; the package needs `wdk-wallet` beta.19 while its
+  neighbours pin beta.17 (npm override); and the bundler cannot estimate an empty Safe, it must be
+  funded first.
 
 ## Design
 

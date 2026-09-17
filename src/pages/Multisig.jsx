@@ -1,0 +1,700 @@
+// The Multisig page: a Safe whose owners are accounts of the signers of the catalogue, shown side
+// by side, and the path of a transaction through them: proposed by one, approved by another,
+// executed by any. Two configurations, each its own Safe, picked from a dropdown: three accounts
+// of the one seed, or one seed account and two other signers. Each owner signs through its own
+// ISigner; the Safe module only ever sees a WalletAccountEvm.
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { isAddress, parseEther, parseUnits } from 'ethers'
+import RemoteCoordinator from '../lib/safe/remote-coordinator.js'
+import SafeOwnerAccount from '../lib/safe/owner-account.js'
+import { predictSafeAddress, safeConfigOf } from '../lib/safe/config.js'
+import { proposerSignatureOf } from '../lib/safe/local-coordinator.js'
+import { balancesOf, userOperationReceipt } from '../lib/safe/balances.js'
+import { createWallet, gaslessOf, loadAccounts, shortAddress, shortBalance } from '../lib/wallet.js'
+import { recipients, remember } from '../lib/recipients.js'
+import { errorDetails, when } from '../lib/ui.js'
+import { CONFIGS, DEFAULT_CONFIG } from '../lib/safe/configs.js'
+
+const CONFIG_KEY = 'wdk-signers-demo.safe-config'
+
+// what each provider receives when an owner signs the SafeOp
+const SIGNS = {
+  seed: 'EIP-712 hash, local key in the page',
+  ledger: 'EIP-712 typed data on the device',
+  metamask: 'eth_signTypedData_v4 in the extension',
+  turnkey: 'EIP-712 typed data, Turnkey API',
+  dfns: 'EIP-712 typed data, Dfns API',
+  openfort: '32-byte digest, Openfort API',
+  fireblocks: 'EIP-712 typed data, Fireblocks RAW signing'
+}
+const SEED_ACCOUNTS = 3
+const RECEIPT_TRIES = 30 // 3 s apart
+
+const short = (hex, n = 10) => (hex ? `${hex.slice(0, n)}…${hex.slice(-6)}` : '')
+const keyOfOwner = (o) => `${o.signerId}:${o.index ?? 0}`
+const sameOwner = (a, b) => a && b && a.signerId === b.signerId && (a.index ?? 0) === (b.index ?? 0)
+
+export default function Multisig ({ signers, net, append, serviceError }) {
+  const [configId, setConfigId] = useState(() => { try { return CONFIGS.some(c => c.id === localStorage.getItem(CONFIG_KEY)) ? localStorage.getItem(CONFIG_KEY) : DEFAULT_CONFIG } catch { return DEFAULT_CONFIG } })
+  const config = CONFIGS.find(c => c.id === configId)
+  const coordinator = useMemo(() => new RemoteCoordinator({ network: net.id, config: configId }), [net.id, configId])
+  const scope = `${net.id}:${configId}`
+  // what the service said for this network and configuration; another scope means loading
+  const [loaded, setLoaded] = useState({ scope: null, safe: null, proposals: [], error: null })
+  const safe = loaded.scope === scope ? loaded.safe : undefined // undefined: loading, null: none yet
+  const proposals = loaded.scope === scope ? loaded.proposals : []
+  const safeError = loaded.scope === scope ? loaded.error : null
+  const [balanceOf, setBalanceOf] = useState({ address: null, value: null })
+  const balances = safe && balanceOf.address === safe.address ? balanceOf.value : null
+  const [selectedId, setSelectedId] = useState(null)
+  const [ownersOn, setOwnersOn] = useState({ net: null, map: {} }) // "signer:index" -> { phase, address, error }
+  const owners = useMemo(() => (ownersOn.net === net.id ? ownersOn.map : {}), [ownersOn, net.id])
+  const setOwners = useCallback((update) => setOwnersOn(o => ({ net: net.id, map: update(o.net === net.id ? o.map : {}) })), [net.id])
+  const [busy, setBusy] = useState(null) // { action, owner }
+  const [setup, setSetup] = useState(null)
+  const [transfer, setTransfer] = useState(null)
+  const [fund, setFund] = useState(null)
+  const [copied, setCopied] = useState(null)
+  const handles = useRef(new Map()) // signerId -> { entry, handle, accounts }
+
+  const byId = useCallback((id) => signers.find(s => s.id === id), [signers])
+  const custodyOf = (id) => byId(id)?.key ?? 'remote'
+  // "Seed phrase #1", or the signer's name for a single-key signer
+  const nameOf = (o) => {
+    if (!o) return ''
+    const entry = byId(o.signerId)
+    const label = entry?.label ?? o.signerId
+    return entry?.isDerivable === false ? label : `${label} #${o.index ?? 0}`
+  }
+
+  const chooseConfig = (id) => {
+    setConfigId(id)
+    try { localStorage.setItem(CONFIG_KEY, id) } catch {}
+  }
+
+  // --- the Safe and its proposals, from the service --------------------------------------------------
+  const refreshSafe = useCallback(async () => {
+    try {
+      const s = await coordinator.getSafe()
+      const list = s ? await coordinator.listProposals() : []
+      setLoaded({ scope, safe: s, proposals: list, error: null })
+      setSelectedId(id => (id && list.some(p => p.proposalId === id)) ? id : (list[0]?.proposalId ?? null))
+      return s
+    } catch (e) {
+      setLoaded({ scope, safe: null, proposals: [], error: e.message })
+      return null
+    }
+  }, [coordinator, scope])
+
+  const refreshBalances = useCallback(async (address) => {
+    if (!address) return
+    try { setBalanceOf({ address, value: await balancesOf(address, net) }) } catch (e) { setBalanceOf({ address, value: { error: e.message } }) }
+  }, [net])
+
+  const refreshProposals = useCallback(async () => {
+    const list = await coordinator.listProposals()
+    setLoaded(l => ({ ...l, scope, proposals: list }))
+    return list
+  }, [coordinator, scope])
+
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- the state lands after the fetch, not synchronously
+    refreshSafe().then(s => refreshBalances(s?.address))
+  }, [refreshSafe, refreshBalances])
+
+  // the owner wallets live as long as the page and the network
+  useEffect(() => {
+    const map = handles.current
+    return () => {
+      for (const h of map.values()) h.handle.wallet.dispose()
+      map.clear()
+    }
+  }, [net.id])
+
+  useEffect(() => {
+    const onKey = (ev) => { if (ev.key === 'Escape') { setSetup(null); setTransfer(null); setFund(null) } }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // --- owners: one wallet per signer, built on first use; the account by index ----------------------
+  const ownerOf = useCallback(async ({ signerId, index = 0 }) => {
+    const key = `${signerId}:${index}`
+    const entry = byId(signerId)
+    if (!entry) throw new Error(`${signerId} is not in the catalogue`)
+    let built = handles.current.get(signerId)
+    if (!built) {
+      if (!entry.available) throw new Error(`${entry.label}: ${entry.reason}`)
+      if (!entry.networks?.includes(net.id)) throw new Error(`${entry.label} is not configured for ${net.label}`)
+      setOwners(o => ({ ...o, [key]: { ...o[key], phase: 'connecting', error: null } }))
+      try {
+        const signer = await entry.build(net)
+        const handle = createWallet(signer, net.id)
+        const accounts = await loadAccounts(handle, entry.isDerivable === false ? 1 : SEED_ACCOUNTS)
+        remember(signerId, accounts)
+        built = { entry, handle, accounts }
+        handles.current.set(signerId, built)
+        setOwners(o => {
+          const next = { ...o }
+          for (const a of accounts) next[`${signerId}:${a.index ?? 0}`] = { phase: 'ready', address: a.address, error: null }
+          return next
+        })
+        append({ ok: true, signer: entry.label, text: `${accounts.length} owner account${accounts.length > 1 ? 's' : ''} resolved on ${net.label}`, details: { signer: signerId, where: entry.where, accounts: accounts.map(a => ({ index: a.index, path: a.path, address: a.address })) } })
+      } catch (e) {
+        setOwners(o => ({ ...o, [key]: { phase: 'error', error: e.message } }))
+        throw e
+      }
+    }
+    const account = built.accounts.find(a => (a.index ?? 0) === index) ?? built.accounts[0]
+    return { entry, handle: built.handle, ...account, index, signerId }
+  }, [byId, net, append, setOwners])
+
+  // the Safe module on that owner's account: the shim swaps the seed-built owner for the account
+  const safeAs = useCallback((owner) => {
+    const expected = safe.owners.find(o => sameOwner(o, owner))
+    if (expected && expected.address.toLowerCase() !== owner.address.toLowerCase()) {
+      throw new Error(`${nameOf(owner)} resolves to ${shortAddress(owner.address)} but the Safe expects ${shortAddress(expected.address)}; forget the Safe and set it up again`)
+    }
+    return new SafeOwnerAccount(owner.account, safeConfigOf(net, { owners: safe.owners.map(o => o.address), threshold: safe.threshold, saltNonce: safe.saltNonce }, coordinator))
+  }, [safe, net, coordinator]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const act = useCallback(async (what, fn) => {
+    setBusy(what)
+    try {
+      await fn()
+    } catch (e) {
+      append({ ok: false, signer: nameOf(what.owner), text: e.message, details: errorDetails(e) })
+    } finally {
+      setBusy(null)
+    }
+  }, [append]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // --- the flow: propose, approve, execute -----------------------------------------------------------
+  const propose = useCallback(async () => {
+    const t = transfer
+    setTransfer(null)
+    await act({ action: 'propose', owner: t.as }, async () => {
+      const value = t.asset ? parseUnits(t.amount || '0', t.asset.decimals) : parseEther(t.amount || '0')
+      if (!(value > 0n)) throw new Error('The amount must be above zero.')
+      if (!isAddress(t.to)) throw new Error('Pick a recipient.')
+      const owner = await ownerOf(t.as)
+      const account = safeAs(owner)
+      try {
+        const human = `${t.amount} ${t.asset ? t.asset.symbol : net.native}`
+        coordinator.describeNext({ asset: t.asset ? t.asset.symbol : net.native, amount: t.amount, recipient: t.to, toLabel: t.toLabel, proposer: t.as })
+        const r = t.asset
+          ? await account.proposeTransfer({ token: t.asset.address, recipient: t.to, amount: value })
+          : await account.propose({ to: t.to, value, data: '0x' })
+        const record = await coordinator.getProposal(r.proposalId)
+        append({
+          ok: true,
+          signer: nameOf(owner),
+          text: `proposed ${human} to ${t.toLabel ?? shortAddress(t.to)}, ${r.confirmations} of ${r.threshold} signatures`,
+          details: { proposalId: r.proposalId, safeOperationHash: r.proposalId, signedAs: SIGNS[owner.signerId], signature: proposerSignatureOf(record.userOperation.signature), userOperation: record.userOperation, paymaster: net.safe.paymasterAddress, bundler: net.safe.bundlerUrl }
+        })
+        setSelectedId(r.proposalId)
+        await refreshProposals()
+      } finally {
+        account.dispose()
+      }
+    })
+  }, [transfer, act, ownerOf, safeAs, coordinator, append, net, refreshProposals]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const approve = useCallback(async (proposalId, o) => {
+    await act({ action: 'approve', owner: o, proposalId }, async () => {
+      const owner = await ownerOf(o)
+      const account = safeAs(owner)
+      try {
+        const r = await account.approveProposal(proposalId)
+        const record = await coordinator.getProposal(proposalId)
+        const mine = record.confirmations.find(c => c.owner.toLowerCase() === owner.address.toLowerCase())
+        append({
+          ok: true,
+          signer: nameOf(owner),
+          text: `approved ${short(proposalId)}, ${r.confirmations} of ${r.threshold} signatures${r.confirmations >= r.threshold ? ', ready to execute' : ''}`,
+          details: { proposalId, signedAs: SIGNS[owner.signerId], signature: mine?.signature, confirmations: record.confirmations.map(c => ({ owner: c.owner, signer: `${c.signerId} #${c.index}`, at: c.at })) }
+        })
+        await refreshProposals()
+      } finally {
+        account.dispose()
+      }
+    })
+  }, [act, ownerOf, safeAs, coordinator, append, refreshProposals]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const execute = useCallback(async (proposalId, o) => {
+    await act({ action: 'execute', owner: o, proposalId }, async () => {
+      const owner = await ownerOf(o)
+      const account = safeAs(owner)
+      let hash, fee
+      try {
+        ({ hash, fee } = await account.executeProposal(proposalId))
+      } finally {
+        account.dispose()
+      }
+      const execution = { hash, by: { signerId: owner.signerId, index: owner.index, owner: owner.address }, moduleMaxGasCost: String(fee ?? '') }
+      await coordinator.recordExecution(proposalId, execution)
+      append({
+        ok: true,
+        signer: nameOf(owner),
+        text: `executed ${short(proposalId)}: user operation ${short(hash)} sent to the bundler`,
+        link: `${net.blockscout}/op/${hash}`,
+        details: { proposalId, userOperationHash: hash, sentBy: owner.address, bundler: net.safe.bundlerUrl, moduleFee: `${fee} (the module's max gas cost, not ${net.safe.paymasterToken.symbol} units)`, explorer: `${net.blockscout}/op/${hash}` }
+      })
+      await refreshProposals()
+      // then the receipt, when the bundler has it
+      for (let i = 0; i < RECEIPT_TRIES; i++) {
+        await new Promise(r => setTimeout(r, 3000))
+        let receipt = null
+        try { receipt = await userOperationReceipt(net.safe.bundlerUrl, hash) } catch {}
+        if (receipt) {
+          await coordinator.recordExecution(proposalId, { ...execution, txHash: receipt.txHash, success: receipt.success, blockNumber: receipt.blockNumber })
+          append({ ok: receipt.success !== false, signer: nameOf(owner), text: `${receipt.success === false ? 'reverted' : 'mined'} in ${short(receipt.txHash)}`, link: `${net.explorer}/tx/${receipt.txHash}`, details: { proposalId, ...receipt } })
+          await refreshProposals()
+          await refreshBalances(safe.address)
+          return
+        }
+      }
+      append({ ok: false, signer: nameOf(owner), text: `no receipt after ${RECEIPT_TRIES * 3} s, check the explorer`, link: `${net.blockscout}/op/${hash}` })
+    })
+  }, [act, ownerOf, safeAs, coordinator, append, net, refreshProposals, refreshBalances, safe]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // fund the Safe from the demo seed's account 0, gasless, in the paymaster token
+  const confirmFund = useCallback(async () => {
+    const f = fund
+    setFund(null)
+    const from = { signerId: 'seed', index: 0 }
+    await act({ action: 'fund', owner: from }, async () => {
+      const token = net.safe.paymasterToken
+      const value = parseUnits(f.amount || '0', token.decimals)
+      if (!(value > 0n)) throw new Error('The amount must be above zero.')
+      const owner = await ownerOf(from)
+      const { hash } = await gaslessOf(owner.account, net).transfer({ token: token.address, recipient: safe.address, amount: value })
+      append({ ok: true, signer: nameOf(owner), text: `sent ${f.amount} ${token.symbol} to the Safe, gasless, user operation ${short(hash)}`, link: `${net.blockscout}/op/${hash}`, details: { from: owner.address, to: safe.address, amount: `${f.amount} ${token.symbol}`, userOperationHash: hash } })
+      setTimeout(() => refreshBalances(safe.address), 12000)
+    })
+  }, [fund, act, ownerOf, net, safe, append, refreshBalances]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // --- set up: pick owners, threshold, optional salt, predicted address ---------------------------------
+  // candidates: the seed's first accounts, and account 0 of every other signer on this network
+  const openSetup = useCallback(async () => {
+    const onNet = signers.filter(s => s.networks?.includes(net.id))
+    const candidates = onNet.flatMap(s => s.id === 'seed'
+      ? Array.from({ length: SEED_ACCOUNTS }, (_, i) => ({ key: `seed:${i}`, signerId: 'seed', index: i, entry: s }))
+      : [{ key: `${s.id}:0`, signerId: s.id, index: 0, entry: s }])
+    const picked = new Set(config.owners.map(keyOfOwner).filter(k => candidates.some(c => c.key === k && c.entry.available)))
+    setSetup({ candidates, picked, threshold: Math.min(config.threshold, picked.size || 1), salt: '', addresses: {}, resolving: true, predicted: null, error: null })
+    const addresses = {}
+    try {
+      const seed = onNet.find(s => s.id === 'seed')
+      if (seed) for (let i = 0; i < SEED_ACCOUNTS; i++) addresses[`seed:${i}`] = (await ownerOf({ signerId: 'seed', index: i })).address
+    } catch {}
+    const groups = await recipients(onNet.filter(s => s.id !== 'seed'))
+    for (const g of groups) if (g.accounts.length) addresses[`${g.id}:0`] = g.accounts[0].address
+    setSetup(s => s && { ...s, addresses: { ...addresses, ...s.addresses }, resolving: false })
+  }, [signers, net, config, ownerOf])
+
+  // connecting a prompting owner (Ledger, MetaMask) from the setup sheet
+  const connectForSetup = useCallback(async (c) => {
+    try {
+      const owner = await ownerOf(c)
+      setSetup(s => s && { ...s, addresses: { ...s.addresses, [c.key]: owner.address } })
+    } catch (e) {
+      setSetup(s => s && { ...s, error: e.message })
+    }
+  }, [ownerOf])
+
+  // the inputs of the prediction; the predicted address is only shown while it matches them
+  const setupInputs = setup && !setup.resolving
+    ? (() => {
+        const list = [...setup.picked].map(k => setup.addresses[k]).filter(Boolean)
+        if (list.length !== setup.picked.size || list.length === 0 || setup.threshold > list.length) return null
+        return { list, threshold: setup.threshold, salt: setup.salt.trim(), key: JSON.stringify([list, setup.threshold, setup.salt.trim()]) }
+      })()
+    : null
+  const predicted = setupInputs && setup.predicted?.key === setupInputs.key ? setup.predicted.address : null
+  useEffect(() => {
+    if (!setupInputs) return
+    let alive = true
+    predictSafeAddress(net, { owners: setupInputs.list, threshold: setupInputs.threshold, saltNonce: setupInputs.salt || undefined })
+      .then(a => alive && setSetup(s => s && { ...s, predicted: { key: setupInputs.key, address: a }, error: null }))
+      .catch(e => alive && setSetup(s => s && { ...s, error: e.message }))
+    return () => { alive = false }
+  }, [setupInputs?.key, net]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const createSafe = useCallback(async () => {
+    const s = setup
+    try {
+      const created = await coordinator.createSafe({
+        owners: s.candidates.filter(c => s.picked.has(c.key)).map(c => ({ signerId: c.signerId, index: c.index, address: s.addresses[c.key] })),
+        threshold: s.threshold,
+        saltNonce: s.salt.trim() || undefined
+      })
+      setSetup(null)
+      append({ ok: true, signer: 'Safe', text: `${config.label}: Safe ${created.threshold} of ${created.owners.length} registered at ${shortAddress(created.address)}, nothing sent, it deploys with its first operation`, details: created })
+      await refreshSafe()
+      await refreshBalances(created.address)
+    } catch (e) {
+      setSetup(x => x && { ...x, error: e.message })
+    }
+  }, [setup, coordinator, append, refreshSafe, refreshBalances, config])
+
+  const forget = useCallback(async () => {
+    if (!window.confirm(`Forget the "${config.label}" Safe and its proposals in the service? The chain keeps what was deployed.`)) return
+    await coordinator.forgetSafe()
+    append({ ok: true, signer: 'Safe', text: `forgot ${shortAddress(safe.address)} (${config.label}) on ${net.label}` })
+    await refreshSafe()
+  }, [coordinator, safe, net, append, refreshSafe, config])
+
+  const openTransfer = useCallback(async (as) => {
+    const asset = net.tokens[0] ?? null
+    const proposer = as ?? safe.owners.find(o => owners[keyOfOwner(o)]?.phase === 'ready') ?? safe.owners[0]
+    setTransfer({ asset, amount: asset ? '0.1' : '0.0005', to: null, toLabel: null, custom: '', targets: [], loading: true, as: proposer })
+    const targets = await recipients(signers.filter(s => s.networks?.includes(net.id)), { exclude: safe.address })
+    const first = targets.find(g => g.accounts.length)
+    setTransfer(t => t && { ...t, targets, loading: false, to: first?.accounts[0].address ?? null, toLabel: first ? `${first.label}${first.accounts[0].index !== undefined ? ` #${first.accounts[0].index}` : ''}` : null })
+  }, [net, safe, owners, signers])
+
+  const copy = useCallback(async (text, tag) => {
+    try { await navigator.clipboard.writeText(text); setCopied(tag); setTimeout(() => setCopied(null), 1200) } catch {}
+  }, [])
+
+  // --- derived: the selected proposal and each owner's part in it --------------------------------------
+  const selected = proposals.find(p => p.proposalId === selectedId) ?? null
+  const token = net.safe?.paymasterToken
+  const held = balances?.tokens?.find(t => t.symbol === token?.symbol)?.balance
+  const roleOf = (o) => {
+    if (!selected) return null
+    return {
+      proposer: sameOwner(selected.proposedBy, o),
+      confirmed: selected.confirmations.some(c => sameOwner(c, o)),
+      executed: sameOwner(selected.execution?.by, o)
+    }
+  }
+  const custodyPill = (o, key) => <span key={key} className={`custody ${custodyOf(o.signerId)}`} title={o.owner ?? o.address}>{nameOf(o)}</span>
+  // the cards read in the configuration's order (seed first), not in the module's address order
+  const rank = (o) => { const i = config.owners.findIndex(c => sameOwner(c, o)); return i === -1 ? 99 : i }
+  const ownerCards = safe ? [...safe.owners].sort((a, b) => rank(a) - rank(b)) : config.owners.map(o => ({ ...o, address: null }))
+
+  const header = (
+    <div className='ms-head'>
+      <label className='select-wrap'>
+        <span className='eyebrow'>Configuration</span>
+        <select className='select' value={configId} onChange={ev => chooseConfig(ev.target.value)} aria-label='Safe configuration'>
+          {CONFIGS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+        </select>
+      </label>
+      <p className='muted'>{config.blurb}. Same Safe module, same page: only the owners change.</p>
+    </div>
+  )
+
+  if (!net.safe) {
+    return (
+      <div className='ms'>
+        {header}
+        <section className='tile'>
+          <h2 className='eyebrow'>Multisig</h2>
+          <p className='muted'>The Safe demo runs on Arbitrum One, where Candide's paymaster takes its fee in USDT0. Switch the Testnet toggle off.</p>
+        </section>
+      </div>
+    )
+  }
+
+  return (
+    <div className='ms'>
+      {header}
+      {serviceError && <p className='warn'>Signer service unreachable: {serviceError}. Run <code>npm run service</code>.</p>}
+      {safeError && <p className='warn'>{safeError}</p>}
+
+      {/* 1. the Safe */}
+      <section className={`tile banner ${safe ? 'ready' : ''}`}>
+        {safe === undefined && <p className='muted'>Loading the Safe…</p>}
+        {safe === null && (
+          <div className='banner-empty'>
+            <div>
+              <h2 className='eyebrow'>Safe · {config.label} · not set up on {net.label}</h2>
+              <p className='muted'>Owners: {config.owners.map(o => nameOf(o)).join(', ')} by default, editable. The Safe gets a counterfactual address and deploys with its first operation, gas paid in {token.symbol}.</p>
+            </div>
+            <button className='btn primary' onClick={openSetup} disabled={Boolean(serviceError)}>Set up the Safe</button>
+          </div>
+        )}
+        {safe && (
+          <div className='banner-grid'>
+            <div className='banner-main'>
+              <div className='tile-top'>
+                <span className='tile-label'>Safe · {config.label} · {safe.threshold} of {safe.owners.length}</span>
+                <span className={`status-pill ${balances?.deployed ? 'ok' : 'plain'}`}>{balances ? (balances.deployed ? 'deployed' : 'not deployed yet') : '…'}</span>
+              </div>
+              <div className='addr big'>
+                <code title={safe.address}>{safe.address}</code>
+                <button className='mini' onClick={() => copy(safe.address, 'safe')}>{copied === 'safe' ? 'copied' : 'copy'}</button>
+                <a className='mini' href={`${net.explorer}/address/${safe.address}`} target='_blank' rel='noreferrer'>explorer</a>
+              </div>
+              <div className='path'>Safe modules v0.2.0 · EntryPoint v0.6 · salt {safe.saltNonce} · {net.label}, chain {net.chainId}</div>
+              {balances && !balances.deployed && <p className='muted small'>Not deployed: the first executed proposal carries the deployment. The Safe must hold the amount plus the fee before anything can be estimated.</p>}
+            </div>
+            <div className='banner-side'>
+              <div className='tile-value' title={held ?? ''}>{balances ? (shortBalance(held) ?? '—') : <span className='skeleton' />}{balances && <span className='unit'>{token.symbol}</span>}</div>
+              <div className='tokens'><span className='token'><b>{shortBalance(balances?.native) ?? '…'}</b> {net.native}</span>{balances?.error && <span className='token'>{balances.error}</span>}</div>
+              <div className='banner-actions'>
+                <button className='btn' onClick={() => setFund({ amount: '0.5' })} disabled={busy !== null}>Fund from seed #0</button>
+                <button className='btn primary' onClick={() => openTransfer()} disabled={busy !== null}>New transfer</button>
+              </div>
+              <button className='link small' onClick={forget}>Forget this Safe</button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* 2. the owners */}
+      <section className='owners' aria-label='Owners'>
+        {ownerCards.map(o => {
+          const key = keyOfOwner(o)
+          const state = owners[key]
+          const role = roleOf(o)
+          const entry = byId(o.signerId)
+          const onNet = entry?.available && entry.networks?.includes(net.id)
+          const mine = selected?.confirmations.find(c => sameOwner(c, o))
+          const canApprove = safe && selected && !selected.execution && !role?.confirmed && selected.confirmations.length < safe.threshold
+          const canExecute = safe && selected && !selected.execution && selected.confirmations.length >= safe.threshold
+          const isBusy = busy && sameOwner(busy.owner, o)
+          const status = !safe
+            ? 'preview'
+            : isBusy
+              ? `${busy.action}…`
+              : state?.phase === 'connecting'
+                ? 'connecting…'
+                : state?.phase === 'error'
+                  ? 'error'
+                  : !onNet
+                    ? `not on ${net.label}`
+                    : role?.executed
+                      ? 'executed'
+                      : role?.proposer
+                        ? 'proposed'
+                        : role?.confirmed
+                          ? 'approved'
+                          : canApprove
+                            ? 'waiting for signature'
+                            : canExecute
+                              ? 'can execute'
+                              : entry?.prompts && state?.phase !== 'ready' ? 'connect to sign' : 'idle'
+          return (
+            <article key={key} className={`tile owner ${role?.confirmed || role?.executed ? 'signed' : ''} ${isBusy ? 'busy' : ''}`}>
+              <div className='owner-head'>
+                <span className='label'>{nameOf(o)}</span>
+                <span className={`custody ${custodyOf(o.signerId)}`}>{custodyOf(o.signerId)}</span>
+              </div>
+              <div className='owner-kind'>{entry?.kind ?? o.signerId}</div>
+              <div className='addr'>
+                {o.address
+                  ? <><code title={o.address}>{shortAddress(o.address)}</code><a className='mini' href={`${net.explorer}/address/${o.address}`} target='_blank' rel='noreferrer'>explorer</a></>
+                  : <span className='muted'>account {o.index ?? 0} of {entry?.label ?? o.signerId}</span>}
+              </div>
+              <div className='state'><span className={`state-dot ${state?.phase === 'ready' || role?.confirmed ? 'ready' : state?.phase === 'connecting' || isBusy ? 'connecting' : state?.phase === 'error' ? 'error' : ''}`} />{status}</div>
+              {state?.error && <p className='warn'>{state.error}</p>}
+              {mine && (
+                <details className='signed-block'>
+                  <summary>Signed the SafeOp · {when(mine.at)}</summary>
+                  <div className='signed-what'>{SIGNS[o.signerId]}</div>
+                  <div className='mono'>hash {short(selected.proposalId, 12)}</div>
+                  <div className='mono'>sig {short(mine.signature, 12)}</div>
+                </details>
+              )}
+              {role?.executed && <div className='signed-what'>sent the user operation {short(selected.execution.hash)}</div>}
+              {safe && (
+                <div className='owner-actions'>
+                  {(!selected || selected.execution) && <button className='btn' disabled={busy !== null || !onNet} onClick={() => openTransfer(o)}>Propose as {nameOf(o)}</button>}
+                  {canApprove && <button className='btn primary' disabled={busy !== null || !onNet} onClick={() => approve(selected.proposalId, o)}>Approve as {nameOf(o)}</button>}
+                  {canExecute && <button className='btn primary' disabled={busy !== null || !onNet} onClick={() => execute(selected.proposalId, o)}>Execute as {nameOf(o)}</button>}
+                </div>
+              )}
+            </article>
+          )
+        })}
+      </section>
+
+      {/* 3. the flow */}
+      {safe && (
+        <section className='flow' aria-label='Transaction flow'>
+          {(() => {
+            const p = selected
+            const n = p?.confirmations.length ?? 0
+            const steps = [
+              { title: 'Proposed', done: Boolean(p), who: p?.proposedBy, sub: p ? `${p.meta?.amount ?? ''} ${p.meta?.asset ?? ''} to ${p.meta?.toLabel ?? shortAddress(p.meta?.recipient ?? '')}` : 'any owner proposes and signs first' },
+              { title: `Approved (${n} of ${safe.threshold})`, done: n >= safe.threshold, who: null, sub: p ? (n >= safe.threshold ? 'threshold met' : `needs ${safe.threshold - n} more owner${safe.threshold - n > 1 ? 's' : ''}`) : 'other owners add their signature' },
+              { title: 'Executed', done: Boolean(p?.execution), who: p?.execution?.by, sub: p?.execution ? (p.execution.txHash ? 'mined' : 'sent to the bundler') : (n >= safe.threshold ? 'any owner can execute' : 'after the threshold') }
+            ]
+            return steps.map((s, i) => (
+              <div key={s.title} className='flow-item'>
+                {i > 0 && <span className={`arrow ${steps[i - 1].done ? 'done' : ''}`} aria-hidden='true' />}
+                <div className={`step ${s.done ? 'done' : ''}`}>
+                  <span className='num'>{i + 1}</span>
+                  <div className='step-body'>
+                    <div className='step-title'>{s.title}</div>
+                    {i === 1 && p && <div className='step-who'>{p.confirmations.map(c => custodyPill(c, c.owner))}</div>}
+                    {i !== 1 && s.who && <div className='step-who'>{custodyPill(s.who, 'who')}{s.who.at && <span className='muted small'>{when(s.who.at)}</span>}</div>}
+                    {i === 2 && p?.execution && <div className='step-who'><span className='muted small'>{when(p.execution.at)}</span></div>}
+                    <div className='step-sub'>{s.sub}</div>
+                    {i === 2 && p?.execution && (
+                      <div className='step-links'>
+                        <a className='mini' href={`${net.blockscout}/op/${p.execution.hash}`} target='_blank' rel='noreferrer'>user op</a>
+                        {p.execution.txHash && <a className='mini' href={`${net.explorer}/tx/${p.execution.txHash}`} target='_blank' rel='noreferrer'>tx</a>}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))
+          })()}
+        </section>
+      )}
+
+      {/* 4. proposals */}
+      {safe && (
+        <section className='proposals'>
+          <div className='history-head'>
+            <h4 className='eyebrow'>Proposals · {proposals.length}</h4>
+            <button className='link small' onClick={() => { refreshProposals(); refreshBalances(safe.address) }}>refresh</button>
+          </div>
+          {proposals.length === 0 && <p className='muted'>No proposal yet. Fund the Safe, then propose a transfer as one of the owners.</p>}
+          <ul>
+            {proposals.map(p => (
+              <li key={p.proposalId}>
+                <button className={`proposal ${p.proposalId === selectedId ? 'active' : ''}`} onClick={() => setSelectedId(p.proposalId)}>
+                  <span className='main'>
+                    <span className='what'>{p.meta ? `${p.meta.amount} ${p.meta.asset} to ${p.meta.toLabel ?? shortAddress(p.meta.recipient)}` : 'custom operation'}</span>
+                    <span className='sub'>{short(p.proposalId, 12)} · by {nameOf(p.proposedBy)} · {when(p.createdAt)}</span>
+                  </span>
+                  <span className='confs'>{p.confirmations.map(c => custodyPill(c, c.owner))}<span className='muted small'>{p.confirmations.length}/{safe.threshold}</span></span>
+                  <span className={`status-pill ${p.status === 'executed' ? 'ok' : p.status === 'ready' ? 'warn' : 'plain'}`}>{p.status}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* sheets */}
+      {setup && (
+        <div className='modal-backdrop' onClick={() => setSetup(null)}>
+          <div className='modal' role='dialog' aria-label='Set up the Safe' onClick={ev => ev.stopPropagation()}>
+            <h4 className='eyebrow'>Set up the {config.label} Safe on {net.label}</h4>
+            <p className='muted small'>Any account of the seed, account 0 of every other signer. Nothing is sent: the address is computed from the owners, the threshold and the salt.</p>
+            <ul className='checks'>
+              {setup.candidates.map(c => {
+                const address = setup.addresses[c.key]
+                const checked = setup.picked.has(c.key)
+                return (
+                  <li key={c.key}>
+                    <label className={`check ${!c.entry.available ? 'off' : ''}`}>
+                      <input type='checkbox' checked={checked} disabled={!c.entry.available || !address} onChange={ev => setSetup(s => { const picked = new Set(s.picked); if (ev.target.checked) picked.add(c.key); else picked.delete(c.key); return { ...s, picked, threshold: Math.min(s.threshold, Math.max(1, picked.size)) } })} />
+                      <span className='label'>{nameOf(c)}</span>
+                      <span className={`custody ${c.entry.key}`}>{c.entry.key}</span>
+                      <span className='addr-cell'>
+                        {address ? <code title={address}>{shortAddress(address)}</code> : !c.entry.available ? <span className='reason'>{c.entry.reason}</span> : c.entry.prompts ? <button className='mini' onClick={ev => { ev.preventDefault(); connectForSetup(c) }}>connect</button> : <span className='muted'>{setup.resolving ? 'resolving…' : 'no account'}</span>}
+                      </span>
+                    </label>
+                  </li>
+                )
+              })}
+            </ul>
+            <div className='setup-row'>
+              <span className='eyebrow'>Threshold</span>
+              <div className='assets'>
+                {Array.from({ length: Math.max(1, setup.picked.size) }, (_, i) => i + 1).map(n => (
+                  <button key={n} className={`pill ${setup.threshold === n ? 'active' : ''}`} onClick={() => setSetup(s => ({ ...s, threshold: n }))}>{n} of {setup.picked.size}</button>
+                ))}
+              </div>
+            </div>
+            <label className='field compact'>
+              <span className='eyebrow'>Salt, optional</span>
+              <span className='input'><input placeholder='0x… to reproduce a known Safe, else derived from owners and threshold' value={setup.salt} onChange={ev => setSetup(s => ({ ...s, salt: ev.target.value }))} /></span>
+            </label>
+            <div className='predicted'>
+              <span className='eyebrow'>Predicted address</span>
+              {predicted ? <code>{predicted}</code> : <span className='muted small'>{setup.picked.size === 0 ? 'pick at least one owner' : setupInputs ? 'computing…' : 'waiting for every picked owner to resolve'}</span>}
+            </div>
+            {setup.error && <p className='warn'>{setup.error}</p>}
+            <div className='sheet-actions'>
+              <button className='btn' onClick={() => setSetup(null)}>Cancel</button>
+              <button className='btn primary' disabled={!predicted} onClick={createSafe}>Create {setup.threshold} of {setup.picked.size}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {transfer && safe && (
+        <div className='modal-backdrop' onClick={() => setTransfer(null)}>
+          <div className='modal' role='dialog' aria-label='New transfer' onClick={ev => ev.stopPropagation()}>
+            <h4 className='eyebrow'>New transfer from the Safe</h4>
+            <div className='assets'>
+              {[...net.tokens, { symbol: net.native, address: null }].map(asset => (
+                <button key={asset.symbol} className={`pill ${(transfer.asset?.address ?? null) === asset.address ? 'active' : ''}`} onClick={() => setTransfer(t => ({ ...t, asset: asset.address ? asset : null, amount: asset.address ? '0.1' : '0.0005' }))}>{asset.symbol}</button>
+              ))}
+            </div>
+            <label className='field'>
+              <span className='eyebrow'>Amount</span>
+              <span className='input'>
+                <input inputMode='decimal' value={transfer.amount} onChange={ev => setTransfer(t => ({ ...t, amount: ev.target.value }))} />
+                <span className='unit'>{transfer.asset ? transfer.asset.symbol : net.native}</span>
+              </span>
+              <span className='muted small'>the Safe holds {shortBalance(held) ?? '…'} {token.symbol} and {shortBalance(balances?.native) ?? '…'} {net.native}; the fee is taken in {token.symbol} by the paymaster</span>
+            </label>
+            <div className='eyebrow'>To</div>
+            {transfer.loading && <p className='muted'>Resolving the demo's accounts…</p>}
+            <ul className='targets'>
+              {transfer.targets.map(g => (
+                <li key={g.id}>
+                  <div className='target-group'><span className='label'>{g.label}</span><span className={`custody ${g.key}`}>{g.key}</span>{g.error && <span className='reason'>{g.error}</span>}</div>
+                  {g.accounts.map(a => {
+                    const label = a.index !== undefined ? `${g.label} #${a.index}` : g.label
+                    return (
+                      <button key={a.address} className={`target ${transfer.to === a.address ? 'active' : ''}`} onClick={() => setTransfer(t => ({ ...t, to: a.address, toLabel: label, custom: '' }))} title={a.address}>
+                        <span>{a.index !== undefined ? `#${a.index}` : 'account'}</span><code>{shortAddress(a.address)}</code>
+                      </button>
+                    )
+                  })}
+                </li>
+              ))}
+            </ul>
+            <label className='field compact'>
+              <span className='eyebrow'>Or any address</span>
+              <span className='input'><input placeholder='0x…' value={transfer.custom} onChange={ev => { const v = ev.target.value.trim(); setTransfer(t => ({ ...t, custom: ev.target.value, ...(isAddress(v) ? { to: v, toLabel: null } : {}) })) }} /></span>
+            </label>
+            <div className='setup-row'>
+              <span className='eyebrow'>Proposed by</span>
+              <div className='assets'>
+                {safe.owners.map(o => <button key={keyOfOwner(o)} className={`pill ${sameOwner(transfer.as, o) ? 'active' : ''}`} onClick={() => setTransfer(t => ({ ...t, as: o }))}>{nameOf(o)}</button>)}
+              </div>
+            </div>
+            {held !== undefined && Number(held) === 0 && <p className='warn'>The Safe holds no {token.symbol}: fund it first, the bundler cannot estimate an empty Safe.</p>}
+            <div className='sheet-actions'>
+              <button className='btn' onClick={() => setTransfer(null)}>Cancel</button>
+              <button className='btn primary' disabled={!transfer.to || transfer.loading} onClick={propose}>Propose {transfer.amount || '0'} {transfer.asset ? transfer.asset.symbol : net.native} as {nameOf(transfer.as)}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {fund && safe && (
+        <div className='modal-backdrop' onClick={() => setFund(null)}>
+          <div className='modal' role='dialog' aria-label='Fund the Safe' onClick={ev => ev.stopPropagation()}>
+            <h4 className='eyebrow'>Fund the Safe from seed #0</h4>
+            <p className='muted small'>A gasless {token.symbol} transfer through the 7702 account of the demo seed, gas paid in {token.symbol}. The Safe needs the amount of its next transfer plus a fee of a few cents.</p>
+            <label className='field'>
+              <span className='eyebrow'>Amount</span>
+              <span className='input'>
+                <input inputMode='decimal' value={fund.amount} onChange={ev => setFund({ amount: ev.target.value })} />
+                <span className='unit'>{token.symbol}</span>
+              </span>
+            </label>
+            <div className='sheet-actions'>
+              <button className='btn' onClick={() => setFund(null)}>Cancel</button>
+              <button className='btn primary' onClick={confirmFund}>Send {fund.amount || '0'} {token.symbol} to the Safe</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

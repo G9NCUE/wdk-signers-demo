@@ -19,11 +19,12 @@ import { registryOf, startService } from './helpers/service.js'
 
 const MNEMONIC = 'test test test test test test test test test test test junk'
 const key = (i) => HDNodeWallet.fromPhrase(MNEMONIC, undefined, `m/44'/60'/0'/0/${i}`)
-// three owners: seed #0 in the browser, and two accounts of the "remote" providers
+// three owners: seed #0 in the browser, and two accounts of the "remote" providers (keys 4 and 5,
+// so the seed-only configuration, on keys 0 to 2, is a different Safe)
 const OWNERS = [
-  { signerId: 'seed', address: key(0).address },
-  { signerId: 'dfns', address: key(1).address },
-  { signerId: 'openfort', address: key(2).address }
+  { signerId: 'seed', index: 0, address: key(0).address },
+  { signerId: 'dfns', index: 0, address: key(4).address },
+  { signerId: 'openfort', index: 0, address: key(5).address }
 ]
 const signDigest = (i, digest) => new SigningKey(key(i).privateKey).sign(digest).serialized
 // a proposal as the module submits it: the proposer's signature sits in the user operation after
@@ -47,12 +48,12 @@ after(async () => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-const coordinator = () => new RemoteCoordinator({ network: 'arbitrum', baseUrl: service.baseUrl })
+const coordinator = (config = 'mixed') => new RemoteCoordinator({ network: 'arbitrum', config, baseUrl: service.baseUrl })
 
 test('creating the Safe: refusals first, then a description with the predicted address, kept in a file', async () => {
   const c = coordinator()
   assert.equal(await c.getSafe(), null)
-  await assert.rejects(new RemoteCoordinator({ network: 'sepolia', baseUrl: service.baseUrl }).createSafe({ owners: OWNERS, threshold: 2 }), /no Safe configuration/)
+  await assert.rejects(new RemoteCoordinator({ network: 'sepolia', config: 'mixed', baseUrl: service.baseUrl }).createSafe({ owners: OWNERS, threshold: 2 }), /no Safe configuration/)
   await assert.rejects(c.createSafe({ owners: OWNERS, threshold: 4 }), /threshold must be between 1 and 3/)
   await assert.rejects(c.createSafe({ owners: [...OWNERS.slice(0, 2), { signerId: 'fireblocks', address: key(3).address }], threshold: 2 }), /fireblocks is not available on Arbitrum One/)
   await assert.rejects(c.createSafe({ owners: [OWNERS[0], { signerId: 'dfns', address: OWNERS[0].address.toLowerCase() }], threshold: 1 }), /share an address/)
@@ -67,9 +68,18 @@ test('creating the Safe: refusals first, then a description with the predicted a
   assert.notEqual(safe.address, await predictSafeAddress(NETWORKS.arbitrum, { owners: OWNERS.map(o => o.address), threshold: 3 }), 'the threshold is part of the address')
 
   await assert.rejects(c.createSafe({ owners: OWNERS, threshold: 2 }), /already exists/)
-  const onDisk = JSON.parse(readFileSync(join(dir, 'arbitrum.json'), 'utf8'))
+  const onDisk = JSON.parse(readFileSync(join(dir, 'arbitrum.mixed.json'), 'utf8'))
   assert.equal(onDisk.safe.address, safe.address)
   assert.deepEqual((await c.getSafe()).owners, safe.owners)
+
+  // another configuration is another Safe: three accounts of one seed, its own file
+  const seedOnly = coordinator('seed')
+  assert.equal(await seedOnly.getSafe(), null)
+  const s2 = await seedOnly.createSafe({ owners: [0, 1, 2].map(i => ({ signerId: 'seed', index: i, address: key(i).address })), threshold: 2 })
+  assert.deepEqual(s2.owners.map(o => [o.signerId, o.index]).sort((a, b) => a[1] - b[1]), [['seed', 0], ['seed', 1], ['seed', 2]])
+  assert.notEqual(s2.address, safe.address)
+  assert.equal((await c.getSafe()).address, safe.address, 'the mixed Safe is untouched')
+  await assert.rejects(new RemoteCoordinator({ network: 'arbitrum', config: 'Bad Name', baseUrl: service.baseUrl }).getSafe(), /bad configuration name/)
 })
 
 test('a proposal travels through the coordinator: proposer recovered, second owner confirms, a stranger is refused', async () => {
@@ -81,17 +91,18 @@ test('a proposal travels through the coordinator: proposer recovered, second own
   const proposed = await c.submitProposal(id, proposalOf(id, 0))
   assert.equal(proposed.proposedBy.signerId, 'seed')
   assert.equal(proposed.proposedBy.owner, key(0).address)
+  assert.equal(proposed.proposedBy.index, 0)
   assert.equal(proposed.status, 'pending')
   assert.equal(proposed.meta.amount, '0.2')
   assert.equal(proposed.confirmations.length, 1)
 
   await assert.rejects(c.confirmProposal(id, signDigest(7, id)), /not an owner of this Safe/)
-  await assert.rejects(c.confirmProposal(keccak256(toUtf8Bytes('nope')), signDigest(1, id)), /unknown proposal/)
+  await assert.rejects(c.confirmProposal(keccak256(toUtf8Bytes('nope')), signDigest(4, id)), /unknown proposal/)
 
-  const confirmed = await c.confirmProposal(id, signDigest(1, id))
+  const confirmed = await c.confirmProposal(id, signDigest(4, id))
   assert.deepEqual(confirmed.confirmations.map(x => x.signerId), ['seed', 'dfns'])
   assert.equal(confirmed.status, 'ready', '2 of 3 reached')
-  assert.equal((await c.confirmProposal(id, signDigest(1, id))).confirmations.length, 2, 'confirming twice counts once')
+  assert.equal((await c.confirmProposal(id, signDigest(4, id))).confirmations.length, 2, 'confirming twice counts once')
 
   const stored = await c.getProposal(id)
   assert.equal(stored.userOperation.signature.length, 2 + 24 + 130)
@@ -103,12 +114,15 @@ test('execution is recorded by the page and the module reads it as executed; the
   const c = coordinator()
   const first = keccak256(toUtf8Bytes('proposal one'))
   const second = keccak256(toUtf8Bytes('proposal two'))
-  await c.submitProposal(second, proposalOf(second, 2))
+  await c.submitProposal(second, proposalOf(second, 5))
 
-  const done = await c.recordExecution(first, { hash: '0xuserop', by: { signerId: 'openfort', owner: key(2).address }, fee: '0.028296' })
+  const done = await c.recordExecution(first, { hash: '0xuserop', by: { signerId: 'openfort', index: 0, owner: key(5).address } })
   assert.equal(done.status, 'executed')
   assert.equal(done.execution.by.signerId, 'openfort')
   assert.equal(done.userOperation.ethereumTxHash, '0xuserop', 'what the module checks for status')
+  const mined = await c.recordExecution(first, { hash: '0xuserop', by: done.execution.by, txHash: '0xtx', success: true })
+  assert.equal(mined.execution.at, done.execution.at, 'the receipt keeps the execution time')
+  assert.equal(mined.userOperation.ethereumTxHash, '0xtx')
   await assert.rejects(c.recordExecution(keccak256(toUtf8Bytes('nope')), { hash: '0x' }), /unknown proposal/)
 
   const list = await c.listProposals()
@@ -117,7 +131,7 @@ test('execution is recorded by the page and the module reads it as executed; the
   // the service restarted on the same directory sees the same Safe and proposals
   const again = await startService(registryOf([]), { safeDir: dir })
   try {
-    const c2 = new RemoteCoordinator({ network: 'arbitrum', baseUrl: again.baseUrl })
+    const c2 = new RemoteCoordinator({ network: 'arbitrum', config: 'mixed', baseUrl: again.baseUrl })
     assert.equal((await c2.getSafe()).threshold, 2)
     assert.equal((await c2.listProposals()).length, 2)
   } finally {
@@ -130,7 +144,7 @@ test('messages go through the same three calls', async () => {
   const id = keccak256(toUtf8Bytes('hello'))
   assert.equal(await c.getMessage(id), null)
   await c.submitMessage('0x0000000000000000000000000000000000000001', id, { message: 'hello', signature: signDigest(0, id) })
-  await c.confirmMessage(id, signDigest(1, id))
+  await c.confirmMessage(id, signDigest(4, id))
   assert.equal((await c.getMessage(id)).confirmations.length, 1)
   await assert.rejects(c.confirmMessage(keccak256(toUtf8Bytes('nope')), '0x'), /unknown message/)
 })
@@ -140,7 +154,7 @@ test('forgetting the Safe clears the description and the proposals, the chain is
   await c.forgetSafe()
   assert.equal(await c.getSafe(), null)
   assert.deepEqual(await c.listProposals(), [])
-  await assert.rejects(c.submitProposal(keccak256(toUtf8Bytes('x')), proposalOf(keccak256(toUtf8Bytes('x')), 0)), /no Safe on this network yet/)
+  await assert.rejects(c.submitProposal(keccak256(toUtf8Bytes('x')), proposalOf(keccak256(toUtf8Bytes('x')), 0)), /no Safe for this configuration yet/)
 })
 
 test('the owner shim runs the Safe module on a remote account: the module sees the account, not a seed', async () => {

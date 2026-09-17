@@ -1,12 +1,13 @@
-// The browser's IMultisigCoordinator: every call goes to the local service, which keeps the Safe and
-// its proposals in a file per network. The Safe module calls the six methods; the page uses the rest.
+// The browser's IMultisigCoordinator: every call goes to the local service, which keeps one Safe
+// and its proposals per network and configuration ("seed", "mixed"). The Safe module calls the six
+// methods; the page uses the rest.
 import { IMultisigCoordinator } from '@tetherto/wdk-protocol-multisig-safe'
 import { parse, stringify } from '../json.js'
 
 export default class RemoteCoordinator extends IMultisigCoordinator {
-  constructor ({ network, baseUrl = '/api' }) {
+  constructor ({ network, config = 'mixed', baseUrl = '/api' }) {
     super()
-    this._base = `${baseUrl}/safe/${network}`
+    this._base = `${baseUrl}/safe/${network}/${config}`
     this._meta = null
   }
 

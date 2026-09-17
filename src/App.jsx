@@ -1,27 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { BROWSER_SIGNERS, loadRemoteSigners } from './signers/catalog.js'
-import { ACTIONS, balanceOf, createWallet, formatDetails, loadAccounts, loadHistory, parseEther, parseUnits, shortAddress, shortBalance, tokenBalancesOf } from './lib/wallet.js'
+import { ACTIONS, balanceOf, createWallet, loadAccounts, loadHistory, parseEther, parseUnits, shortAddress, shortBalance, tokenBalancesOf } from './lib/wallet.js'
 import { recipients, remember } from './lib/recipients.js'
 import { DEFAULT_NETWORK, DEFAULT_TESTNET, NETWORKS, networkOf, networksFor } from './lib/networks.js'
+import { errorDetails, when } from './lib/ui.js'
+import Log from './components/Log.jsx'
+import Multisig from './pages/Multisig.jsx'
 
 const TESTNET_KEY = 'wdk-signers-demo.testnet'
 function storedTestnet () { try { return localStorage.getItem(TESTNET_KEY) === '1' } catch { return false } }
 
+// the two pages, as tabs in the top bar; the hash keeps the page across reloads
+const PAGES = [
+  { id: 'wallet', hash: '#wallet', label: 'WDK Signers', subtitle: (net) => <>One <code>WalletManagerEvm</code>, one <code>ISigner</code> at a time. Seven signers behind the same contract, on {net.label}.</> },
+  { id: 'multisig', hash: '#multisig', label: 'WDK Multisig', subtitle: (net) => <>A Safe 2-of-3 whose owners are signers of the catalogue. Proposed, approved and executed through <code>ISigner</code>, on {net.label}.</> }
+]
+const pageFromHash = () => PAGES.find(p => p.hash === window.location.hash)?.id ?? 'wallet'
+
 const DIRECTION = { in: { sign: '↓', label: 'Received' }, out: { sign: '↑', label: 'Sent' }, self: { sign: '↻', label: 'Self' } }
-
-function when (iso) {
-  const d = new Date(iso)
-  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-}
-
-// what an error can tell beyond its message: the WDK error class, a cause, a provider's code
-function errorDetails (e) {
-  const out = { error: e.message, type: e.name || e.constructor?.name }
-  if (e.code !== undefined) out.code = e.code
-  if (e.cause) out.cause = e.cause.message ?? String(e.cause)
-  if (e.stack) out.stack = e.stack.split('\n').slice(0, 6).join('\n')
-  return out
-}
 
 const ACTION_LIST = [
   { name: 'signMessage', label: 'Sign message', icon: '✎' },
@@ -54,6 +50,7 @@ export default function App () {
   const [testnet, setTestnet] = useState(storedTestnet)
   const [networkId, setNetworkId] = useState(() => (storedTestnet() ? DEFAULT_TESTNET : DEFAULT_NETWORK))
   const [netSheet, setNetSheet] = useState(false)
+  const [view, setView] = useState(pageFromHash)
   const net = networkOf(networkId)
   const walletRef = useRef(null)
   const nextId = useRef(0)
@@ -65,6 +62,12 @@ export default function App () {
     loadRemoteSigners()
       .then(remote => setSigners([...BROWSER_SIGNERS, ...remote]))
       .catch(e => setServiceError(e.message))
+  }, [])
+
+  useEffect(() => {
+    const onHash = () => setView(pageFromHash())
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
   }, [])
 
   // Escape closes whichever sheet is open
@@ -225,9 +228,12 @@ export default function App () {
               <img src='/assets/wdk-logo.svg' alt='WDK' width='170' height='61' />
             </a>
             <div className='topbar-title'>
-              <h1>WDK signers</h1>
-              <p className='subtitle'>One <code>WalletManagerEvm</code>, one <code>ISigner</code> at a time. Seven signers behind the same contract, on {net.label}.</p>
+              <h1>{PAGES.find(p => p.id === view).label}</h1>
+              <p className='subtitle'>{PAGES.find(p => p.id === view).subtitle(net)}</p>
             </div>
+            <ul className='nav' role='tablist' aria-label='Pages'>
+              {PAGES.map(p => <li key={p.id}><a href={p.hash} role='tab' aria-selected={view === p.id} aria-current={view === p.id ? 'page' : undefined}>{p.label}</a></li>)}
+            </ul>
           </div>
           <div className='topbar-right'>
             <label className='testnet-toggle' title='Testnet mode: Sepolia instead of Arbitrum One'>
@@ -236,8 +242,8 @@ export default function App () {
               Testnet
             </label>
             <div className='view-toggle' role='group' aria-label='Layout'>
-              <button aria-pressed={!devOpen} onClick={() => setDevOpen(false)}>Phone</button>
-              <button aria-pressed={devOpen} onClick={() => setDevOpen(true)}>Phone + log</button>
+              <button aria-pressed={!devOpen} onClick={() => setDevOpen(false)}>{view === 'wallet' ? 'Phone' : 'Page'}</button>
+              <button aria-pressed={devOpen} onClick={() => setDevOpen(true)}>{view === 'wallet' ? 'Phone + log' : 'Page + log'}</button>
             </div>
             <a className='gh-link' href='https://github.com/G9NCUE/wdk-signers-demo' aria-label='Source on GitHub' title='Source on GitHub'>
               <svg viewBox='0 0 16 16' width='20' height='20' aria-hidden='true' fill='currentColor'><path d='M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z' /></svg>
@@ -246,8 +252,9 @@ export default function App () {
         </div>
       </header>
 
-      <div className={`stage ${devOpen ? '' : 'solo'}`}>
-        <div className='phone' aria-label='Phone mock'>
+      <div className={`stage ${devOpen ? '' : 'solo'} ${view === 'multisig' ? 'wide' : ''}`}>
+        {view === 'multisig' && <Multisig signers={signers} net={net} append={append} serviceError={serviceError} />}
+        {view === 'wallet' && <div className='phone' aria-label='Phone mock'>
           <span className='side mute' aria-hidden='true' />
           <span className='side vol-up' aria-hidden='true' />
           <span className='side vol-down' aria-hidden='true' />
@@ -490,7 +497,7 @@ export default function App () {
             )}
             <span className='home' aria-hidden='true' />
           </div>
-        </div>
+        </div>}
 
         {devOpen && (
           <aside className='dev'>
@@ -499,44 +506,5 @@ export default function App () {
         )}
       </div>
     </div>
-  )
-}
-
-function Log ({ log, expanded, toggle, setExpanded, clear }) {
-  const [open, setOpen] = useState(true)
-  return (
-    <section className='log'>
-      <div className='log-head'>
-        <button className='toggle' onClick={() => setOpen(v => !v)} aria-expanded={open}>
-          <span className='chev'>{open ? '▾' : '▸'}</span> <span className='eyebrow'>Log</span> <span className='count'>{log.length}</span>
-        </button>
-        {log.length > 0 && open && (
-          <span className='log-tools'>
-            <button className='link small' onClick={() => setExpanded(new Set(log.map(e => e.id)))}>expand all</button>
-            <button className='link small' onClick={() => setExpanded(new Set())}>collapse all</button>
-            <button className='link small' onClick={clear}>clear</button>
-          </span>
-        )}
-      </div>
-      {open && log.length === 0 && <p className='muted'>Nothing yet. Every signer call lands here with its details.</p>}
-      {open && (
-        <ul>
-          {log.map(e => {
-            const isOpen = expanded.has(e.id)
-            return (
-              <li key={e.id} className={`${e.ok ? 'ok' : 'bad'} ${isOpen ? 'open' : ''}`}>
-                <div className='row' onClick={() => e.details && toggle(e.id)} role={e.details ? 'button' : undefined} aria-expanded={e.details ? isOpen : undefined}>
-                  <span className='chev'>{e.details ? (isOpen ? '▾' : '▸') : ''}</span>
-                  <span className='at'>{e.at}</span>
-                  <span className='who'>{e.signer}{e.account !== undefined ? ` #${e.account}` : ''}</span>
-                  <span className='what'>{e.link ? <a href={e.link} target='_blank' rel='noreferrer' onClick={ev => ev.stopPropagation()}>{e.text}</a> : e.text}</span>
-                </div>
-                {isOpen && e.details && <pre className='details'>{formatDetails(e.details)}</pre>}
-              </li>
-            )
-          })}
-        </ul>
-      )}
-    </section>
   )
 }
