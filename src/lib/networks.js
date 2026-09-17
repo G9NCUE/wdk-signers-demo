@@ -15,6 +15,7 @@ export const NETWORKS = {
     indexer: 'sepolia', // WDK indexer slug
     tokens: [],
     gasless: null,
+    safe: null,
     fireblocksAsset: 'ETH_TEST5',
     dfnsNetwork: 'EthereumSepolia'
   },
@@ -36,6 +37,13 @@ export const NETWORKS = {
       // operations at eth_sendUserOperation with a garbled -32500 (verified 2026-09-17), v0.9 goes through
       delegationAddress: '0xa46cc63eBF4Bd77888AA327837d20b23A63a56B5',
       entryPointVersion: '0.9',
+      paymasterToken: { address: USDT0_ARBITRUM, symbol: 'USDT0', decimals: 6 }
+    },
+    // the Safe 2-of-3: Safe modules v0.2.0 on EntryPoint v0.6, gas paid in USDT0 through Candide's
+    // v0.6 token paymaster (verified 2026-09-17, deployment included in the first user operation)
+    safe: {
+      bundlerUrl: 'https://api.candide.dev/public/v3/42161',
+      paymasterAddress: '0x36f4aa64673568782461bf03c75462f8ef0a1b76',
       paymasterToken: { address: USDT0_ARBITRUM, symbol: 'USDT0', decimals: 6 }
     },
     fireblocksAsset: 'ETH-AETH',

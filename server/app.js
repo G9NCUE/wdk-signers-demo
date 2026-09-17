@@ -1,11 +1,14 @@
 // The signing service as a Hono app, built from a registry so tests can run it in-process on fakes.
-// Routes: GET /api/signers, GET /api/history/:address, POST /api/signers/:id/:op.
+// Routes: GET /api/signers, GET /api/history/:address, POST /api/signers/:id/:op, and under
+// /api/safe the Safe of each network with its proposals (server/safe.js) when a directory is given.
 import { Hono } from 'hono'
 import { history } from './history.js'
+import { createSafeRoutes } from './safe.js'
 import { parse, stringify } from '../src/lib/json.js'
 
-export function createApp (registry, { log = console.error } = {}) {
+export function createApp (registry, { log = console.error, safeDir = null } = {}) {
   const app = new Hono()
+  if (safeDir) app.route('/api/safe', createSafeRoutes({ dir: safeDir, log }))
 
   // ETH transactions and USDT transfers of one address, newest first
   app.get('/api/history/:address', async (c) => {
