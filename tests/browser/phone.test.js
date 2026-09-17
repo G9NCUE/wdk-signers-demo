@@ -109,8 +109,10 @@ test('the testnet toggle off puts the seed signer on Arbitrum with USDT0 balance
   await page.waitForSelector('.sheet', { state: 'detached' })
   await page.click('.testnet-toggle')
   await page.waitForSelector('.state-dot.ready', { timeout: 60000 })
-  await page.waitForFunction(() => document.querySelector('.tokens')?.textContent.includes('USDT0'), null, { timeout: 30000 })
+  // on Arbitrum the card leads with USDT0 and ETH follows in the small row
+  await page.waitForFunction(() => /USDT0/.test(document.querySelector('.tile-value')?.textContent || ''), null, { timeout: 30000 })
   assert.equal(await page.$eval('.tile .status-pill', e => e.textContent), 'Arbitrum One')
+  assert.match(await page.$eval('.tokens', e => e.textContent), /ETH/)
   await page.click('.action:has-text("Send")')
   await page.waitForSelector('.targets')
   await page.waitForFunction(() => !/Resolving/.test(document.querySelector('.sheet')?.innerText || ''), null, { timeout: 60000 })
