@@ -135,7 +135,14 @@ export const ACTIONS = {
       const human = `${formatUnits(value, asset.decimals)} ${asset.symbol}`
       if (gasless) {
         const gl = gaslessOf(account, network)
-        const { hash, fee } = await gl.transfer(options)
+        let hash, fee
+        try {
+          ({ hash, fee } = await gl.transfer(options))
+        } catch (e) {
+          const cause = e.cause ? String(e.cause) : ''
+          if (/token balance lower/i.test(cause)) throw new Error(`the paymaster takes its fee in ${asset.symbol} and this account does not hold enough ${asset.symbol} for the amount plus the fee (${cause})`)
+          throw e
+        }
         return {
           ok: true,
           text: `sent ${human} to ${toLabel} gasless, user operation ${hash}`,

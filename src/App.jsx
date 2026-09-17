@@ -178,6 +178,23 @@ export default function App () {
   const account = accounts[current]
   const balance = shortBalance(account?.balance)
 
+  // what the sender holds of the chosen asset, and whether the amount fits; gasless takes its fee
+  // from the same token, so the balance must exceed the amount, not just cover it
+  const sendCheck = (() => {
+    if (!send || !account) return null
+    const held = send.asset ? account.tokens?.find(t => t.address === send.asset.address)?.balance : account.balance
+    if (held === null || held === undefined || typeof held !== 'string' || held.startsWith('error')) return null
+    let value
+    try { value = send.asset ? parseUnits(send.amount || '0', send.asset.decimals) : parseEther(send.amount || '0') } catch { return 'not a number' }
+    const balance = send.asset ? parseUnits(held, send.asset.decimals) : parseEther(held)
+    if (value <= 0n) return 'amount must be above zero'
+    if (balance === 0n) return `this account holds no ${send.asset ? send.asset.symbol : net.native} on ${net.label}`
+    if (value > balance) return `above the balance of ${shortBalance(held)} ${send.asset ? send.asset.symbol : net.native}`
+    if (send.gasless && value === balance) return 'leave some for the paymaster fee'
+    return null
+  })()
+
+
   // history of the selected account, reloaded when the account changes and after a send;
   // "loading" is derived: the history on hand is for another address, or a refresh is pending
   useEffect(() => {
@@ -456,9 +473,10 @@ export default function App () {
                       </li>
                     ))}
                   </ul>
+                  {sendCheck && <p className='warn'>{sendCheck}</p>}
                   <div className='sheet-actions'>
                     <button className='btn' onClick={() => setSend(null)}>Cancel</button>
-                    <button className='btn primary' disabled={!send.to || send.loading} onClick={confirmSend}>Send {send.amount || '0'} {send.asset ? send.asset.symbol : net.native}{send.toLabel ? ` to ${send.toLabel}` : ''}{send.gasless ? ', gasless' : ''}</button>
+                    <button className='btn primary' disabled={!send.to || send.loading || Boolean(sendCheck)} onClick={confirmSend}>Send {send.amount || '0'} {send.asset ? send.asset.symbol : net.native}{send.toLabel ? ` to ${send.toLabel}` : ''}{send.gasless ? ', gasless' : ''}</button>
                   </div>
                 </div>
               </div>
