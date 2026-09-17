@@ -10,19 +10,18 @@ export { parseEther, parseUnits, formatUnits }
 const SEPOLIA_OVERRIDE = import.meta.env?.VITE_SEPOLIA_RPC_URL || globalThis.process?.env?.SEPOLIA_RPC_URL
 export const rpcOf = (net) => (net.id === 'sepolia' && SEPOLIA_OVERRIDE) || net.rpc
 export const CHAIN_ID = networkOf(DEFAULT_NETWORK).chainId
-export const RPC_URL = rpcOf(networkOf(DEFAULT_NETWORK))
-export const EXPLORER = networkOf(DEFAULT_NETWORK).explorer
 const ACCOUNT_COUNT = 3
 
-// a manager needs a derivable default signer, so a single-key signer is registered by name
-// behind a throwaway seed, which is the WDK's own pattern for private-key signers
-const PLACEHOLDER_SEED = 'test test test test test test test test test test test junk'
+// the well-known test mnemonic, never funded: a manager needs a derivable default signer, so a
+// single-key signer is registered by name behind it (the WDK's own pattern for private-key
+// signers), and the Safe owner shim builds its throwaway owner on it
+export const THROWAWAY_SEED = 'test test test test test test test test test test test junk'
 
 export function createWallet (signer, networkId = DEFAULT_NETWORK) {
   const net = networkOf(networkId)
   const config = { provider: rpcOf(net), chainId: net.chainId }
   if (signer.isDerivable) return { wallet: new WalletManagerEvm(signer, config), named: null, signer, net }
-  const wallet = new WalletManagerEvm(PLACEHOLDER_SEED, config)
+  const wallet = new WalletManagerEvm(THROWAWAY_SEED, config)
   wallet.addSigner('remote', signer)
   return { wallet, named: 'remote', signer, net }
 }
@@ -72,6 +71,8 @@ export async function tokenBalancesOf (account, net) {
 
 // the 7702 gasless account on top of a WDK account: gas paid in the network's token through the
 // bundler and paymaster of networks.js. Needs signAuthorization on the signer, so not MetaMask.
+// the wrapper is not disposed on purpose: its dispose() disposes the wrapped account, which belongs
+// to the wallet; it holds no key of its own
 export function gaslessOf (account, net) {
   if (!net.gasless) throw new Error(`${net.label} has no gasless configuration in this demo.`)
   const gl = new WalletAccountEvm7702Gasless(account, {

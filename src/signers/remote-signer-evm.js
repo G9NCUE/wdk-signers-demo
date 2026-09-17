@@ -63,16 +63,24 @@ export default class RemoteSignerEvm extends ISigner {
 
   async _call (op, body = {}) {
     if (this._lifecycle.disposed) throw new InvalidSignerError('The signer has been disposed.')
-    const res = await fetch(`${this._baseUrl}/signers/${this._id}/${op}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: stringify({ path: this._path, network: this._network, ...body })
-    })
+    let res
+    try {
+      res = await fetch(`${this._baseUrl}/signers/${this._id}/${op}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: stringify({ path: this._path, network: this._network, ...body })
+      })
+    } catch (e) {
+      throw new Error(`${this._id}: the signer service is unreachable (${e.message}), run npm run service`)
+    }
     const text = await res.text()
     if (!res.ok) {
       let message = text
       try { message = JSON.parse(text).error ?? text } catch {}
-      throw new InvalidSignerError(`${this._id}: ${message}`)
+      // 500 is the provider refusing or failing to sign; anything else is the service's own answer
+      // (unknown signer, unavailable provider, wrong network)
+      if (res.status === 500) throw new InvalidSignerError(`${this._id}: ${message}`)
+      throw new Error(`${this._id}: ${message}`)
     }
     return parse(text)
   }

@@ -2,6 +2,7 @@
 // Written whole, through a temporary file, so a crash mid-write leaves the previous version.
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
+import { parse, stringify } from '../../src/lib/json.js'
 
 const EMPTY = { safe: null, proposals: {}, messages: {} }
 
@@ -14,7 +15,7 @@ export default class SafeFileStore {
   read () {
     if (!this._data) {
       try {
-        this._data = { ...EMPTY, ...JSON.parse(readFileSync(this.file, 'utf8')) }
+        this._data = { ...EMPTY, ...parse(readFileSync(this.file, 'utf8')) }
       } catch (e) {
         if (e.code !== 'ENOENT') throw e
         this._data = structuredClone(EMPTY)
@@ -28,7 +29,7 @@ export default class SafeFileStore {
     change(data)
     mkdirSync(dirname(this.file), { recursive: true })
     const tmp = `${this.file}.${process.pid}.tmp`
-    writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n')
+    writeFileSync(tmp, stringify(data) + '\n')
     renameSync(tmp, this.file)
     return data
   }

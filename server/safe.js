@@ -11,7 +11,7 @@ import { networksOf } from '../src/lib/support.js'
 import { deterministicSalt, normaliseOwners, predictSafeAddress } from '../src/lib/safe/config.js'
 import LocalCoordinator from '../src/lib/safe/local-coordinator.js'
 import { expiryOf } from '../src/lib/safe/paymaster.js'
-import { parse, stringify } from '../src/lib/json.js'
+import { json, readJson } from './http.js'
 import SafeFileStore from './safe/store.js'
 
 const CONFIG = /^[a-z0-9][a-z0-9-]{0,31}$/
@@ -24,7 +24,6 @@ export function createSafeRoutes ({ dir, log = console.error }) {
     if (!stores.has(key)) stores.set(key, new SafeFileStore(join(dir, `${key}.json`)))
     return stores.get(key)
   }
-  const json = (c, value, status = 200) => c.body(stringify(value), status, { 'content-type': 'application/json' })
   const fail = (c, message, status = 400) => c.json({ error: message }, status)
 
   // every route names the network and the configuration; the Safe of that pair is loaded with it
@@ -54,7 +53,7 @@ export function createSafeRoutes ({ dir, log = console.error }) {
     if (!net.safe) return fail(c, `${net.label} has no Safe configuration in this demo`)
     if (c.get('safe')) return fail(c, `a Safe already exists for ${c.get('config')} on ${net.label}, forget it first`, 409)
     try {
-      const body = parse(await c.req.text())
+      const body = await readJson(c)
       const owners = (body.owners ?? []).map(o => ({ signerId: o.signerId, index: Number.isInteger(o.index) ? o.index : 0, address: getAddress(o.address) }))
       for (const o of owners) {
         if (!networksOf(o.signerId).includes(net.id)) throw new Error(`${o.signerId} is not available on ${net.label}`)
@@ -115,7 +114,7 @@ export function createSafeRoutes ({ dir, log = console.error }) {
   app.post('/:network/:config/proposals', async (c) => {
     if (!c.get('safe')) return fail(c, 'no Safe for this configuration yet', 404)
     try {
-      const { proposalId, proposal, meta } = parse(await c.req.text())
+      const { proposalId, proposal, meta } = await readJson(c)
       const record = await c.get('coordinator').submitProposal(proposalId, { ...proposal, meta: meta ?? null })
       return json(c, withSigners(c, record), 201)
     } catch (e) {
@@ -131,7 +130,7 @@ export function createSafeRoutes ({ dir, log = console.error }) {
 
   app.post('/:network/:config/proposals/:id/confirmations', async (c) => {
     try {
-      const { signature } = parse(await c.req.text())
+      const { signature } = await readJson(c)
       const record = await c.get('coordinator').confirmProposal(c.req.param('id'), signature)
       return json(c, withSigners(c, record))
     } catch (e) {
@@ -146,7 +145,7 @@ export function createSafeRoutes ({ dir, log = console.error }) {
     const store = c.get('store')
     if (!store.get(id)) return fail(c, 'unknown proposal', 404)
     const previous = store.get(id)
-    const execution = { at: previous.execution?.at ?? new Date().toISOString(), ...parse(await c.req.text()) }
+    const execution = { at: previous.execution?.at ?? new Date().toISOString(), ...(await readJson(c)) }
     store.set(id, {
       ...previous,
       execution,
@@ -157,7 +156,7 @@ export function createSafeRoutes ({ dir, log = console.error }) {
   })
 
   app.post('/:network/:config/messages', async (c) => {
-    const { safeAddress, messageId, message } = parse(await c.req.text())
+    const { safeAddress, messageId, message } = await readJson(c)
     return json(c, await c.get('coordinator').submitMessage(safeAddress, messageId, message), 201)
   })
 
@@ -168,7 +167,7 @@ export function createSafeRoutes ({ dir, log = console.error }) {
 
   app.post('/:network/:config/messages/:id/confirmations', async (c) => {
     try {
-      const { signature } = parse(await c.req.text())
+      const { signature } = await readJson(c)
       return json(c, await c.get('coordinator').confirmMessage(c.req.param('id'), signature))
     } catch (e) {
       return fail(c, e.message, 404)

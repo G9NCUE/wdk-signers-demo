@@ -3,6 +3,7 @@
 import WalletManagerEvm from '@tetherto/wdk-wallet-evm'
 import { Transaction, verifyAuthorization, verifyMessage, verifyTypedData } from 'ethers'
 import RemoteSignerEvm from '../src/signers/remote-signer-evm.js'
+import { THROWAWAY_SEED } from '../src/lib/wallet.js'
 
 const base = process.env.SIGNER_SERVICE_URL || 'http://127.0.0.1:8787/api'
 const only = process.argv[2]
@@ -36,7 +37,7 @@ for (const s of list) {
 }
 
 function named (signer) {
-  const wallet = new WalletManagerEvm('test test test test test test test test test test test junk')
+  const wallet = new WalletManagerEvm(THROWAWAY_SEED)
   wallet.addSigner('remote', signer)
   return wallet
 }

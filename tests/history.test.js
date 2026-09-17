@@ -87,3 +87,17 @@ test('the default network is Arbitrum, with USDT0 labels and Arbiscan links', as
   assert.equal(h.entries.find(e => e.source === 'wdk-indexer').kind, 'USDT0')
   assert.match(h.entries[0].link, /^https:\/\/arbiscan\.io\/tx\//)
 })
+
+test('a Blockscout failure is reported in the footer, the USDT half still comes', async () => {
+  process.env.WDK_INDEXER_API_KEY = 'k'
+  globalThis.fetch = async (url) => String(url).includes('blockscout') ? new Response('boom', { status: 500 }) : new Response(JSON.stringify(indexer), { status: 200 })
+  const h = await history(ME, { network: 'arbitrum' })
+  assert.equal(h.sources.blockscout, 'HTTP 500')
+  assert.deepEqual(h.entries.map(e => e.kind), ['USDT0'], 'the token is named per network')
+  assert.match(h.entries[0].link, /arbiscan\.io/)
+})
+
+test('an unknown network is refused before any call', async () => {
+  await assert.rejects(history(ME, { network: 'polygon' }), /unknown network polygon/)
+  assert.equal(calls.length, 0)
+})

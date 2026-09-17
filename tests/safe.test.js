@@ -165,6 +165,20 @@ test('the paymaster sponsorship has a three-minute deadline, read from paymaster
   assert.equal((await c.listProposals()).find(p => p.proposalId === id).status, 'expired')
 })
 
+test('the Safe routes refuse what they should: unknown network, bad body, a stranger proposing; a salt reproduces a known Safe', async () => {
+  const c = coordinator()
+  await assert.rejects(new RemoteCoordinator({ network: 'polygon', config: 'mixed', baseUrl: service.baseUrl }).getSafe(), /unknown network/)
+  const res = await fetch(`${service.baseUrl}/safe/arbitrum/mixed/proposals`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{' })
+  assert.equal(res.status, 400)
+  assert.match((await res.json()).error, /malformed/)
+  await assert.rejects(c.submitProposal(keccak256(toUtf8Bytes('stranger')), proposalOf(keccak256(toUtf8Bytes('stranger')), 9)), /not an owner of this Safe/)
+  const known = await c.getSafe()
+  const twin = new RemoteCoordinator({ network: 'arbitrum', config: 'twin', baseUrl: service.baseUrl })
+  const again = await twin.createSafe({ owners: known.owners, threshold: known.threshold, saltNonce: known.saltNonce })
+  assert.equal(again.address, known.address, 'same owners, threshold and salt: same address in another configuration')
+  await twin.forgetSafe()
+})
+
 test('messages go through the same three calls', async () => {
   const c = coordinator()
   const id = keccak256(toUtf8Bytes('hello'))

@@ -3,7 +3,7 @@
 // would). Dry by default: install, predict, quote. SPIKE_EXECUTE=1 runs the broadcasting steps:
 // fund the Safe, propose, approve with a second owner, execute.
 // Run: node --env-file=.env server/safe-spike.mjs
-import { Contract, formatUnits, getAddress } from 'ethers'
+import { Contract, JsonRpcProvider, formatUnits, getAddress } from 'ethers'
 import { SeedSignerEvm } from '@tetherto/wdk-wallet-evm/signers'
 import RemoteSignerEvm from '../src/signers/remote-signer-evm.js'
 import { createWallet, gaslessOf, rpcOf } from '../src/lib/wallet.js'
@@ -16,7 +16,8 @@ import { startService } from '../tests/helpers/service.js'
 const net = NETWORKS.arbitrum
 const USDT0 = net.tokens[0]
 const EXECUTE = process.env.SPIKE_EXECUTE === '1'
-const SEED = process.env.VITE_DEMO_SEED_PHRASE.trim().replace(/^["']|["']$/g, '')
+const SEED = (process.env.VITE_DEMO_SEED_PHRASE ?? '').trim().replace(/^["']|["']$/g, '')
+if (!SEED) throw new Error('VITE_DEMO_SEED_PHRASE is not set in .env')
 const SALT = process.env.SAFE_SALT_NONCE || '0x' + BigInt(20260917).toString(16)
 const t0 = Date.now()
 const step = (m) => console.log(`[${String(Date.now() - t0).padStart(6)} ms] ${m}`)
@@ -48,10 +49,10 @@ const coordinator = new LocalCoordinator({ owners: ownerList })
 const config = {
   provider: rpcOf(net),
   chainId: BigInt(net.chainId),
-  bundlerUrl: net.gasless.bundlerUrl,
-  paymasterUrl: net.gasless.bundlerUrl,
-  paymasterAddress: '0x36f4aa64673568782461bf03c75462f8ef0a1b76', // Candide token paymaster, EntryPoint v0.6, Arbitrum
-  paymasterTokenAddress: USDT0.address,
+  bundlerUrl: net.safe.bundlerUrl,
+  paymasterUrl: net.safe.bundlerUrl,
+  paymasterAddress: net.safe.paymasterAddress, // Candide token paymaster, EntryPoint v0.6, Arbitrum
+  paymasterTokenAddress: net.safe.paymasterToken.address,
   coordinator,
   safeOptions: { owners: ownerList, threshold: 2, saltNonce: SALT }
 }
@@ -63,9 +64,9 @@ const safeAddress = predicted[0]
 const deployed = await safeAs.seed.isDeployed()
 step(`Safe 2-of-3 ${safeAddress}, salt ${SALT}, deployed: ${deployed}`)
 
-const usdt = new Contract(USDT0.address, ['function balanceOf(address) view returns (uint256)'], (await import('ethers')).getDefaultProvider(rpcOf(net)))
+const usdt = new Contract(USDT0.address, ['function balanceOf(address) view returns (uint256)'], new JsonRpcProvider(rpcOf(net), net.chainId, { staticNetwork: true }))
 const balance = async (a) => formatUnits(await usdt.balanceOf(a), USDT0.decimals)
-step(`Safe holds ${await balance(safeAddress)} USDT0; seed #0 ${await balance(addresses.seed)}, seed #1 ${await balance(addresses.seed1 ?? await seed1.getAddress())}`)
+step(`Safe holds ${await balance(safeAddress)} USDT0; seed #0 ${await balance(addresses.seed)}, seed #1 ${await balance(await seed1.getAddress())}`)
 
 const transfer = { token: USDT0.address, recipient: await seed1.getAddress(), amount: 200000n } // 0.2 USDT0
 try {

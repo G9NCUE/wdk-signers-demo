@@ -15,6 +15,7 @@ import { createWallet, formatDetails, gaslessOf, loadAccounts, loadHistory, shor
 import { recipients, remember } from '../lib/recipients.js'
 import { errorDetails, when } from '../lib/ui.js'
 import { CONFIGS, DEFAULT_CONFIG } from '../lib/safe/configs.js'
+import HistoryList from '../components/HistoryList.jsx'
 
 const CONFIG_KEY = 'wdk-signers-demo.safe-config'
 
@@ -42,7 +43,7 @@ function sortOwners (list, order) {
 }
 
 export default function Multisig ({ signers, net, append, serviceError, devOpen }) {
-  const [configId, setConfigId] = useState(() => { try { return CONFIGS.some(c => c.id === localStorage.getItem(CONFIG_KEY)) ? localStorage.getItem(CONFIG_KEY) : DEFAULT_CONFIG } catch { return DEFAULT_CONFIG } })
+  const [configId, setConfigId] = useState(() => { try { const stored = localStorage.getItem(CONFIG_KEY); return CONFIGS.some(c => c.id === stored) ? stored : DEFAULT_CONFIG } catch { return DEFAULT_CONFIG } })
   const config = CONFIGS.find(c => c.id === configId)
   const coordinator = useMemo(() => new RemoteCoordinator({ network: net.id, config: configId }), [net.id, configId])
   const scope = `${net.id}:${configId}`
@@ -66,6 +67,9 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
   const [transfer, setTransfer] = useState(null)
   const [fund, setFund] = useState(null)
   const [copied, setCopied] = useState(null)
+  const [receiptsPending, setReceiptsPending] = useState(() => new Set())
+  const unmounted = useRef(false)
+  useEffect(() => () => { unmounted.current = true }, [])
   const handles = useRef(new Map()) // signerId -> { entry, handle, accounts }
   const [slot, setSlot] = useState(null)
   useEffect(() => { setSlot(document.getElementById('dev-top')) }, [devOpen]) // oxlint-disable-line react/set-state-in-effect -- a DOM lookup, once the column exists
@@ -90,15 +94,19 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
   }
 
   // --- the Safe and its proposals, from the service --------------------------------------------------
+  // a fetch started for one scope must not land after the page moved to another
+  const generation = useRef(0)
   const refreshSafe = useCallback(async () => {
+    const gen = ++generation.current
     try {
       const s = await coordinator.getSafe()
       const list = s ? await coordinator.listProposals() : []
+      if (gen !== generation.current) return null
       setLoaded({ scope, safe: s, proposals: list, error: null })
       setSelectedId(id => (id && list.some(p => p.proposalId === id)) ? id : (list[0]?.proposalId ?? null))
       return s
     } catch (e) {
-      setLoaded({ scope, safe: null, proposals: [], error: e.message })
+      if (gen === generation.current) setLoaded({ scope, safe: null, proposals: [], error: e.message })
       return null
     }
   }, [coordinator, scope, setLoaded, setSelectedId])
@@ -113,7 +121,7 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
 
   const refreshProposals = useCallback(async () => {
     const list = await coordinator.listProposals()
-    setLoaded(l => ({ ...l, scope, proposals: list }))
+    setLoaded(l => (l.scope === scope ? { ...l, proposals: list } : l))
     return list
   }, [coordinator, scope, setLoaded])
 
@@ -126,7 +134,7 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
   useEffect(() => {
     const map = handles.current
     return () => {
-      for (const h of map.values()) h.handle.wallet.dispose()
+      for (const h of map.values()) Promise.resolve(h).then(b => b.handle.wallet.dispose(), () => {})
       map.clear()
     }
   }, [net.id])
@@ -142,29 +150,36 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
     const key = `${signerId}:${index}`
     const entry = byId(signerId)
     if (!entry) throw new Error(`${signerId} is not in the catalogue`)
-    let built = handles.current.get(signerId)
-    if (!built) {
+    // the map holds the build in flight, then its result, so two callers share one wallet
+    if (!handles.current.has(signerId)) {
       if (!entry.available) throw new Error(`${entry.label}: ${entry.reason}`)
       if (!entry.networks?.includes(net.id)) throw new Error(`${entry.label} is not configured for ${net.label}`)
       setOwners(o => ({ ...o, [key]: { ...o[key], phase: 'connecting', error: null } }))
-      try {
+      const building = (async () => {
         const signer = await entry.build(net)
         const handle = createWallet(signer, net.id)
-        const accounts = await loadAccounts(handle, entry.isDerivable === false ? 1 : SEED_ACCOUNTS)
-        remember(signerId, accounts)
-        built = { entry, handle, accounts }
-        handles.current.set(signerId, built)
-        setOwners(o => {
-          const next = { ...o }
-          for (const a of accounts) next[`${signerId}:${a.index ?? 0}`] = { phase: 'ready', address: a.address, error: null }
-          return next
-        })
-        append({ ok: true, signer: entry.label, text: `${accounts.length} owner account${accounts.length > 1 ? 's' : ''} resolved on ${net.label}`, details: { signer: signerId, where: entry.where, accounts: accounts.map(a => ({ index: a.index, path: a.path, address: a.address })) } })
-      } catch (e) {
+        try {
+          const accounts = await loadAccounts(handle, entry.isDerivable === false ? 1 : SEED_ACCOUNTS)
+          remember(signerId, accounts, net.id)
+          setOwners(o => {
+            const next = { ...o }
+            for (const a of accounts) next[`${signerId}:${a.index ?? 0}`] = { phase: 'ready', address: a.address, error: null }
+            return next
+          })
+          append({ ok: true, signer: entry.label, text: `${accounts.length} owner account${accounts.length > 1 ? 's' : ''} resolved on ${net.label}`, details: { signer: signerId, where: entry.where, accounts: accounts.map(a => ({ index: a.index, path: a.path, address: a.address })) } })
+          return { entry, handle, accounts }
+        } catch (e) {
+          handle.wallet.dispose()
+          throw e
+        }
+      })()
+      handles.current.set(signerId, building)
+      building.catch(e => {
+        handles.current.delete(signerId)
         setOwners(o => ({ ...o, [key]: { phase: 'error', error: e.message } }))
-        throw e
-      }
+      })
     }
+    const built = await handles.current.get(signerId)
     const account = built.accounts.find(a => (a.index ?? 0) === index) ?? built.accounts[0]
     return { entry, handle: built.handle, ...account, index, signerId }
   }, [byId, net, append, setOwners])
@@ -192,11 +207,12 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
   // --- the flow: propose, approve, execute -----------------------------------------------------------
   const propose = useCallback(async () => {
     const t = transfer
+    let value
+    try { value = t.asset ? parseUnits(t.amount || '0', t.asset.decimals) : parseEther(t.amount || '0') } catch { return setTransfer(x => ({ ...x, error: `not a number: ${t.amount}` })) }
+    if (!(value > 0n)) return setTransfer(x => ({ ...x, error: 'the amount must be above zero' }))
+    if (!isAddress(t.to)) return setTransfer(x => ({ ...x, error: 'pick a recipient' }))
     setTransfer(null)
     await act({ action: 'propose', owner: t.as }, async () => {
-      const value = t.asset ? parseUnits(t.amount || '0', t.asset.decimals) : parseEther(t.amount || '0')
-      if (!(value > 0n)) throw new Error('The amount must be above zero.')
-      if (!isAddress(t.to)) throw new Error('Pick a recipient.')
       const owner = await ownerOf(t.as)
       const account = safeAs(owner)
       try {
@@ -215,6 +231,7 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
         setSelectedId(r.proposalId)
         await refreshProposals()
       } finally {
+        coordinator.describeNext(null)
         account.dispose()
       }
     })
@@ -241,6 +258,35 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
     })
   }, [act, ownerOf, safeAs, coordinator, append, refreshProposals]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // the receipt, when the bundler has it; the page is not blocked meanwhile, and a page that moved
+  // on (other scope, unmounted) drops the result
+  const followReceipt = useCallback((proposalId, execution, who) => {
+    const gen = generation.current
+    const bundlerUrl = net.safe.bundlerUrl
+    const safeAddress = safe.address
+    const alive = () => gen === generation.current && !unmounted.current
+    setReceiptsPending(s => new Set(s).add(proposalId))
+    ;(async () => {
+      try {
+        for (let i = 0; i < RECEIPT_TRIES && alive(); i++) {
+          await new Promise(r => setTimeout(r, 3000))
+          let receipt = null
+          try { receipt = await userOperationReceipt(bundlerUrl, execution.hash) } catch {}
+          if (!receipt) continue
+          if (!alive()) return
+          await coordinator.recordExecution(proposalId, { ...execution, txHash: receipt.txHash, success: receipt.success, blockNumber: receipt.blockNumber })
+          append({ ok: receipt.success !== false, signer: who, text: `${receipt.success === false ? 'reverted' : 'mined'} in ${short(receipt.txHash)}`, link: `${net.explorer}/tx/${receipt.txHash}`, details: { proposalId, ...receipt } })
+          await refreshProposals()
+          await refreshBalances(safeAddress)
+          return
+        }
+        if (alive()) append({ ok: false, signer: who, text: `no receipt after ${RECEIPT_TRIES * 3} s, check the explorer`, link: `${net.blockscout}/op/${execution.hash}` })
+      } finally {
+        setReceiptsPending(s => { const n = new Set(s); n.delete(proposalId); return n })
+      }
+    })()
+  }, [net, safe, coordinator, append, refreshProposals, refreshBalances])
+
   const execute = useCallback(async (proposalId, o) => {
     await act({ action: 'execute', owner: o, proposalId }, async () => {
       const owner = await ownerOf(o)
@@ -261,22 +307,9 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
         details: { proposalId, userOperationHash: hash, sentBy: owner.address, bundler: net.safe.bundlerUrl, moduleFee: `${fee} (the module's max gas cost, not ${net.safe.paymasterToken.symbol} units)`, explorer: `${net.blockscout}/op/${hash}` }
       })
       await refreshProposals()
-      // then the receipt, when the bundler has it
-      for (let i = 0; i < RECEIPT_TRIES; i++) {
-        await new Promise(r => setTimeout(r, 3000))
-        let receipt = null
-        try { receipt = await userOperationReceipt(net.safe.bundlerUrl, hash) } catch {}
-        if (receipt) {
-          await coordinator.recordExecution(proposalId, { ...execution, txHash: receipt.txHash, success: receipt.success, blockNumber: receipt.blockNumber })
-          append({ ok: receipt.success !== false, signer: nameOf(owner), text: `${receipt.success === false ? 'reverted' : 'mined'} in ${short(receipt.txHash)}`, link: `${net.explorer}/tx/${receipt.txHash}`, details: { proposalId, ...receipt } })
-          await refreshProposals()
-          await refreshBalances(safe.address)
-          return
-        }
-      }
-      append({ ok: false, signer: nameOf(owner), text: `no receipt after ${RECEIPT_TRIES * 3} s, check the explorer`, link: `${net.blockscout}/op/${hash}` })
+      followReceipt(proposalId, execution, nameOf(owner))
     })
-  }, [act, ownerOf, safeAs, coordinator, append, net, refreshProposals, refreshBalances, safe]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [act, ownerOf, safeAs, coordinator, append, net, refreshProposals, followReceipt]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // fund the Safe from the demo seed's account 0, gasless, in the paymaster token
   const confirmFund = useCallback(async () => {
@@ -297,19 +330,19 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
   // --- set up: pick owners, threshold, optional salt, predicted address ---------------------------------
   // candidates: the seed's first accounts, and account 0 of every other signer on this network
   const openSetup = useCallback(async () => {
-    const config = CONFIGS.find(c => c.id === configId)
+    const preset = CONFIGS.find(c => c.id === configId)
     const onNet = signers.filter(s => s.networks?.includes(net.id))
     const candidates = onNet.flatMap(s => s.id === 'seed'
       ? Array.from({ length: SEED_ACCOUNTS }, (_, i) => ({ key: `seed:${i}`, signerId: 'seed', index: i, entry: s }))
       : [{ key: `${s.id}:0`, signerId: s.id, index: 0, entry: s }])
-    const picked = new Set(config.owners.map(keyOfOwner).filter(k => candidates.some(c => c.key === k && c.entry.available)))
-    setSetup({ candidates, picked, threshold: Math.min(config.threshold, picked.size || 1), salt: '', addresses: {}, resolving: true, predicted: null, error: null })
+    const picked = new Set(preset.owners.map(keyOfOwner).filter(k => candidates.some(c => c.key === k && c.entry.available)))
+    setSetup({ candidates, picked, threshold: Math.min(preset.threshold, picked.size || 1), salt: '', addresses: {}, resolving: true, predicted: null, error: null })
     const addresses = {}
     try {
       const seed = onNet.find(s => s.id === 'seed')
       if (seed) for (let i = 0; i < SEED_ACCOUNTS; i++) addresses[`seed:${i}`] = (await ownerOf({ signerId: 'seed', index: i })).address
     } catch {}
-    const groups = await recipients(onNet.filter(s => s.id !== 'seed'))
+    const groups = await recipients(onNet.filter(s => s.id !== 'seed'), { net })
     for (const g of groups) if (g.accounts.length) addresses[`${g.id}:0`] = g.accounts[0].address
     setSetup(s => s && { ...s, addresses: { ...addresses, ...s.addresses }, resolving: false })
   }, [signers, net, configId, ownerOf, setSetup])
@@ -371,8 +404,9 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
   // recipients: the Safe's own owners (the money goes back to one of the signers), or any address
   const openTransfer = useCallback((as, again = null) => {
     const asset = net.safe.paymasterToken
-    const proposer = as ?? safe.owners.find(o => owners[keyOfOwner(o)]?.phase === 'ready') ?? safe.owners[0]
-    const first = sortOwners(safe.owners, configOrder)[0]
+    const inOrder = sortOwners(safe.owners, configOrder)
+    const proposer = as ?? inOrder.find(o => owners[keyOfOwner(o)]?.phase === 'ready') ?? inOrder[0]
+    const first = inOrder[0]
     const to = again?.recipient ?? first.address
     const known = safe.owners.find(o => o.address.toLowerCase() === to.toLowerCase())
     setTransfer({ asset, amount: again?.amount ?? '0.1', to, toLabel: known ? nameOf(known) : (again?.toLabel ?? null), custom: known ? '' : to, as: proposer })
@@ -410,7 +444,7 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
   const custodyPill = (o, key) => <span key={key} className={`custody ${custodyOf(o.signerId)}`} title={o.owner ?? o.address}>{nameOf(o)}</span>
 
   const onChain = safe && (
-        <section className='proposals onchain'>
+    <section className='proposals onchain'>
           <div className='history-head'>
             <h4 className='eyebrow'>On chain · {token.symbol} and {net.native} movements of the Safe</h4>
             <a className='link small' href={`${net.explorer}/address/${safe.address}#tokentxns`} target='_blank' rel='noreferrer'>explorer</a>
@@ -419,23 +453,12 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
           {chain?.error && <p className='warn'>{chain.error}</p>}
           {chain && !chain.error && chain.entries.length === 0 && <p className='muted'>Nothing yet: the address exists only on paper until the first execution.</p>}
           {chain && chain.entries.length > 0 && (
-            <ul className='chain'>
-              {chain.entries.map(e => (
-                <li key={e.id} className={`${e.direction} ${e.status}`}>
-                  <a href={e.link} target='_blank' rel='noreferrer'>
-                    <span className={`sign ${e.direction}`}>{e.direction === 'in' ? '↓' : e.direction === 'out' ? '↑' : '↻'}</span>
-                    <span className='main'>
-                      <span className='what'>{e.direction === 'in' ? 'Received' : e.direction === 'out' ? 'Sent' : 'Self'} {e.kind}{e.status === 'failed' ? ' · failed' : e.status === 'pending' ? ' · pending' : ''}{e.counterparty?.toLowerCase() === net.safe.paymasterAddress.toLowerCase() ? ' · paymaster fee' : ''}</span>
-                      <span className='sub'>{e.counterparty ? shortAddress(e.counterparty) : e.method || 'contract'} · {e.timestamp ? when(e.timestamp) : 'in the mempool'}</span>
-                    </span>
-                    <span className={`amt ${e.direction}`}>{e.direction === 'in' ? '+' : e.direction === 'out' ? '−' : ''}{shortBalance(e.amount)} {e.kind}</span>
-                  </a>
-                </li>
-              ))}
-            </ul>
+            <div className='chain'>
+              <HistoryList entries={chain.entries} tag={e => (e.counterparty?.toLowerCase() === net.safe.paymasterAddress.toLowerCase() ? ' · paymaster fee' : '')} />
+            </div>
           )}
-        </section>
-      )
+    </section>
+  )
 
   // one proposal in full: every signature, the execution, the receipt, the raw user operation
   const detailOf = (p) => (
@@ -644,7 +667,7 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
                 done: Boolean(p?.execution),
                 who: p?.execution?.by,
                 sub: p?.execution
-                  ? (p.execution.txHash ? 'mined' : 'sent to the bundler')
+                  ? (p.execution.txHash ? 'mined' : receiptsPending.has(p.proposalId) ? 'sent to the bundler, waiting for the receipt…' : 'sent to the bundler')
                   : p?.status === 'expired'
                     ? `sponsorship expired at ${when(p.expiresAt)}, re-propose`
                     : (n >= safe.threshold ? 'any owner can execute' : 'after the threshold') + (secondsLeft !== null ? `, paymaster sponsorship valid for ${secondsLeft} s` : '')
@@ -785,6 +808,7 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
                 {safe.owners.map(o => <button key={keyOfOwner(o)} className={`pill ${sameOwner(transfer.as, o) ? 'active' : ''}`} onClick={() => setTransfer(t => ({ ...t, as: o }))}>{nameOf(o)}</button>)}
               </div>
             </div>
+            {transfer.error && <p className='warn'>{transfer.error}</p>}
             {held !== undefined && Number(held) === 0 && <p className='warn'>The Safe holds no {token.symbol}: fund it first, the bundler cannot estimate an empty Safe.</p>}
             <div className='sheet-actions'>
               <button className='btn' onClick={() => setTransfer(null)}>Cancel</button>

@@ -1,6 +1,6 @@
 // The networks the phone can switch between. Shared by the browser and the service (history).
 // Gasless: the WDK's 7702 module over Candide's public bundler and paymaster, gas paid in the token.
-export const USDT0_ARBITRUM = '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9'
+const USDT0_ARBITRUM = '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9'
 
 export const NETWORKS = {
   sepolia: {
@@ -29,7 +29,7 @@ export const NETWORKS = {
     explorer: 'https://arbiscan.io',
     blockscout: 'https://arbitrum.blockscout.com',
     indexer: 'arbitrum',
-    tokens: [{ symbol: 'USDT0', address: USDT0_ARBITRUM, decimals: 6, indexer: 'usdt' }],
+    tokens: [{ symbol: 'USDT0', address: USDT0_ARBITRUM, decimals: 6 }],
     primary: 'USDT0', // the balance the card leads with; the native coin otherwise
     gasless: {
       bundlerUrl: 'https://api.candide.dev/public/v3/42161',

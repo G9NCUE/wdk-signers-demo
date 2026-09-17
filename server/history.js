@@ -21,7 +21,7 @@ export async function history (address, { limit = 20, network = DEFAULT_NETWORK 
 }
 
 async function nativeFrom (me, limit, net) {
-  const blockscout = process.env.BLOCKSCOUT_URL || net.blockscout
+  const blockscout = net.blockscout
   try {
     const res = await fetch(`${blockscout}/api/v2/addresses/${me}/transactions`)
     if (res.status === 404) return { status: 'ok', entries: [] } // unknown address, never seen on chain

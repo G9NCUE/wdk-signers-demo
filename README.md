@@ -3,12 +3,12 @@
 One wallet, seven ways to hold the key. A Vite app on the [Tether WDK](https://github.com/tetherto/wdk-wallet-evm)
 where a single `WalletManagerEvm` runs on one `ISigner` at a time: a seed phrase, a Ledger, MetaMask,
 Turnkey, Dfns, Openfort or Fireblocks. Pick a signer, the phone shows its accounts, balances and
-history on Arbitrum One (or Sepolia behind the testnet toggle); sign a message, sign a transaction offline, or send ETH to another account the
-demo controls. A developer panel keeps every call with the bytes behind it. A second page, **WDK
+history on Arbitrum One (or Sepolia behind the testnet toggle); sign a message, sign a transaction offline, or send ETH or USDT0
+(gasless, the fee paid in USDT0) to another account the demo controls. A developer panel keeps every call with the bytes behind it. A second page, **WDK
 Multisig**, puts the same signers behind a Safe 2-of-3 and shows a transaction proposed, approved and
 executed by three different owners.
 
-![The demo: the phone with a Dfns account selected, the log open beside it](docs/demo.png)
+![The demo: the phone on the seed signer, the log open beside it](docs/demo.png)
 
 ## Signers
 
@@ -57,6 +57,13 @@ The **WDK Multisig** tab (top bar) drives a [Safe](https://safe.global) 2-of-3 t
 | Seed only | seed #0, #1, #2 | the plain 2-of-3 on one key source |
 | Multi-signer | seed #0, Dfns #0, Openfort | three custody models on one Safe: a page key, an MPC key behind an API, a TEE wallet behind an API |
 
+One thing the page makes visible: Candide's token paymaster signs a sponsorship valid for **three
+minutes**, and the owners' signatures cover it (`paymasterAndData` is in the SafeOp). A proposal
+approved later than that is refused by the bundler ("already expired") and can only be proposed
+again; the page shows the countdown, marks such proposals expired and offers to re-propose. A
+multisig that gathers signatures over days needs the Safe to pay its own gas (`useNativeCoins`) or a
+paymaster that does not sign with a deadline.
+
 The page shows the Safe (address, deployed or not, USDT0 and ETH balances), the three owners side by
 side with their custody badge, and the path of the selected proposal: **proposed** by one owner,
 **approved** until the threshold, **executed** by any. The action sits on the owner's card, "Propose
@@ -67,7 +74,7 @@ Candide's token paymaster (EntryPoint v0.6): no ETH anywhere, and the deployment
 executed operation. Arbitrum One only. A transfer is USDT0 only, to one of the owners or to any
 address; the sheet's "initiator" is the owner who signs first, the Safe itself is the sender.
 
-![The Multisig page: the Multi-signer Safe, its three owners, the flow line](docs/multisig.png)
+![The Multisig page: the Multi-signer Safe, its three owners, the flow line, the on-chain movements beside](docs/multisig.png)
 
 Behind it: `src/lib/safe/owner-account.js` puts any `WalletAccountEvm`, hence any `ISigner`, in the
 module's owner seat (the module's constructor only takes a seed, see Findings);
@@ -111,7 +118,7 @@ server/
   app.js                         the routes; index.js is the listener
   safe.js                        the Safe routes: one Safe per network and configuration, proposals, confirmations, executions
   safe/store.js                  the JSON file behind each Safe
-  safe-spike.mjs                 the first end-to-end run of the Safe from Node (seed, Dfns, Openfort), kept as a record
+  safe-spike.mjs                 the first end-to-end run of the Safe from Node (seed, Dfns, Openfort); still runs, on the same config as the page
   history.js                     Blockscout and WDK indexer, merged
   probe.js                       every signer call from Node, through the real WalletManagerEvm
   setup-openfort.mjs             one-time: creates the Openfort backend wallet, prints the .env line
@@ -130,15 +137,16 @@ cp .env.example .env      # fill the providers you have, the others show as unav
 npm run dev               # web on http://localhost:5173, service on 127.0.0.1:8787
 ```
 
-Requirements: Node 22 or later, Chrome or Edge for Ledger (WebHID) and MetaMask, some Sepolia ETH
-from any faucet for the sends.
+Requirements: Node 22 or later, Chrome or Edge for Ledger (WebHID) and MetaMask. The default network is
+Arbitrum One with real USDT0, so the sends need a little USDT0 on the demo seed (cents are enough, the fee
+is paid in USDT0); on Sepolia, some ETH from any faucet.
 
 ### Providers
 
 | Provider | Variables | Where they come from |
 |---|---|---|
 | Turnkey | `TURNKEY_ORGANIZATION_ID`, `TURNKEY_API_PUBLIC_KEY`, `TURNKEY_API_PRIVATE_KEY`, `TURNKEY_WALLET_ID` | app.turnkey.com, an API key and an HD wallet |
-| Dfns | `DFNS_AUTH_TOKEN`, `DFNS_CRED_ID`, `DFNS_PRIVATE_KEY_FILE`, `DFNS_MASTER_KEY_ID`, `DFNS_NETWORK` | app.dfns.io, a service account with a P-256 key and a master key |
+| Dfns | `DFNS_AUTH_TOKEN`, `DFNS_CRED_ID`, `DFNS_PRIVATE_KEY_FILE` (or `DFNS_PRIVATE_KEY`), `DFNS_MASTER_KEY_ID` | app.dfns.io, a service account with a P-256 key and a master key |
 | Openfort | `OPENFORT_SECRET_KEY`, `OPENFORT_WALLET_SECRET`, `OPENFORT_ACCOUNT_ID` | dashboard.openfort.io, then `npx @openfort/cli backend-wallet setup`, then `node --env-file=.env server/setup-openfort.mjs` |
 | Fireblocks | `FIREBLOCKS_API_KEY`, `FIREBLOCKS_SECRET_KEY_FILE`, `FIREBLOCKS_VAULT_ACCOUNT_ID` | a sandbox workspace; an API user with the Signer role from Developer Center → API Users (let the console generate the key pair and download the private key, or upload a CSR); then `node --env-file=.env server/setup-fireblocks.mjs` for the vault account and its `ETH_TEST5` address |
 | WDK indexer | `WDK_INDEXER_API_KEY` | wdk-api.tether.io/register, free, for the USDT half of the history |
@@ -203,6 +211,11 @@ Ledger and MetaMask need a device or an extension in a headed browser and stay m
   cost, not an amount in the paymaster token; the package needs `wdk-wallet` beta.19 while its
   neighbours pin beta.17 (npm override); and the bundler cannot estimate an empty Safe, it must be
   funded first.
+- The Safe module fetches the paymaster data at `propose` time and signs it into the SafeOp. With a
+  signing paymaster (Candide's token paymaster: `validUntil` three minutes ahead) a proposal not
+  executed within the window is dead, and the sponsorship cannot be refreshed without invalidating the
+  owners' signatures. Structural to ERC-4337 with a verifying paymaster; days-long multisigs need the
+  Safe to pay its own gas or a non-signing ERC-20 paymaster.
 
 ## Design
 

@@ -4,10 +4,12 @@
 import { Hono } from 'hono'
 import { history } from './history.js'
 import { createSafeRoutes } from './safe.js'
-import { parse, stringify } from '../src/lib/json.js'
+import { BadRequest, json, localOnly, publicReason, readJson } from './http.js'
 
 export function createApp (registry, { log = console.error, safeDir = null } = {}) {
   const app = new Hono()
+  app.use('/api/*', localOnly)
+  app.onError((e, c) => (e instanceof BadRequest ? c.json({ error: e.message }, 400) : (log(`[service] ${e.message}`), c.json({ error: e.message }, 500))))
   if (safeDir) app.route('/api/safe', createSafeRoutes({ dir: safeDir, log }))
 
   // ETH transactions and USDT transfers of one address, newest first
@@ -23,7 +25,7 @@ export function createApp (registry, { log = console.error, safeDir = null } = {
 
   app.get('/api/signers', (c) => {
     const list = [...registry.values()].map(({ id, label, kind, available, reason, root, networks }) => ({
-      id, label, kind, available, reason, networks, isDerivable: root ? root.isDerivable : null, path: root?.path ?? null
+      id, label, kind, available, reason: publicReason(reason), networks, isDerivable: root ? root.isDerivable : null, path: root?.path ?? null
     }))
     return c.json(list)
   })
@@ -34,13 +36,13 @@ export function createApp (registry, { log = console.error, safeDir = null } = {
     const entry = registry.get(c.req.param('id'))
     if (!entry) return c.json({ error: 'unknown signer' }, 404)
     if (!entry.available) return c.json({ error: entry.reason }, 503)
-    const body = parse(await c.req.text())
+    const body = await readJson(c)
     const network = body.network ?? entry.networks[0]
     if (!entry.roots[network]) return c.json({ error: `${entry.id} is not configured for ${network}` }, 400)
     try {
       const signer = await resolve(entry, network, body.path)
       const result = await run(entry, network, signer, c.req.param('op'), body)
-      return c.body(stringify(result), 200, { 'content-type': 'application/json' })
+      return json(c, result)
     } catch (e) {
       log(`[${entry.id}] ${c.req.param('op')}: ${e.message}`)
       return c.json({ error: e.message }, 500)

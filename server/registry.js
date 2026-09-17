@@ -49,8 +49,7 @@ export const PROVIDERS = [
         authToken: env.DFNS_AUTH_TOKEN,
         signer: new AsymmetricKeySigner({ credId: env.DFNS_CRED_ID, privateKey })
       })
-      const network = networkId ? NETWORKS[networkId].dfnsNetwork : (env.DFNS_NETWORK || 'EthereumSepolia')
-      return new DfnsSignerEvm({ client, masterKeyId: env.DFNS_MASTER_KEY_ID, network })
+      return new DfnsSignerEvm({ client, masterKeyId: env.DFNS_MASTER_KEY_ID, network: NETWORKS[networkId].dfnsNetwork })
     }
   },
   {
@@ -67,7 +66,8 @@ export const PROVIDERS = [
     id: 'fireblocks',
     label: 'Fireblocks',
     kind: 'MPC vault account, RAW signing',
-    build () {
+    // a vault asset is per network (ETH_TEST5 on Sepolia, ETH-AETH on Arbitrum), so one root per network
+    build (networkId) {
       need('FIREBLOCKS_API_KEY', 'FIREBLOCKS_SECRET_KEY_FILE', 'FIREBLOCKS_VAULT_ACCOUNT_ID')
       const basePaths = { sandbox: BasePath.Sandbox, us: BasePath.US, eu: BasePath.EU, eu2: BasePath.EU2 }
       const client = new Fireblocks({
@@ -75,7 +75,7 @@ export const PROVIDERS = [
         secretKey: readFileSync(env.FIREBLOCKS_SECRET_KEY_FILE, 'utf8'),
         basePath: basePaths[env.FIREBLOCKS_BASE_PATH || 'sandbox']
       })
-      return new FireblocksSignerEvm({ client, vaultAccountId: env.FIREBLOCKS_VAULT_ACCOUNT_ID, assetId: env.FIREBLOCKS_ASSET_ID || 'ETH_TEST5' })
+      return new FireblocksSignerEvm({ client, vaultAccountId: env.FIREBLOCKS_VAULT_ACCOUNT_ID, assetId: env.FIREBLOCKS_ASSET_ID || NETWORKS[networkId].fireblocksAsset })
     }
   }
 ]

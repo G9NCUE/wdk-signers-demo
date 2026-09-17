@@ -17,7 +17,7 @@ const MNEMONIC_KEY = 'wdk-signers-demo.mnemonic'
 // app), otherwise a throwaway generated once per browser origin and kept in localStorage.
 const ENV_SEED = (import.meta.env?.VITE_DEMO_SEED_PHRASE || '').trim().replace(/\s+/g, ' ')
 if (ENV_SEED && !Mnemonic.isValidMnemonic(ENV_SEED)) throw new Error('VITE_DEMO_SEED_PHRASE in .env is not a valid BIP-39 phrase')
-export const SEED_SOURCE = ENV_SEED ? '.env' : 'this browser'
+const SEED_SOURCE = ENV_SEED ? '.env' : 'this browser'
 
 function localMnemonic () {
   if (ENV_SEED) return ENV_SEED

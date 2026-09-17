@@ -11,15 +11,16 @@ export default class LocalCoordinator extends IMultisigCoordinator {
     super()
     this._store = store
     this._owners = owners.map(o => getAddress(o))
-    this.events = []
   }
 
+  // a proposal id is the SafeOp hash: submitting it again is the same operation, its confirmations stay
   async submitProposal (proposalId, proposal) {
+    const known = await this.getProposal(proposalId)
+    if (known) return known
     const raw = proposerSignatureOf(proposal.userOperation.signature)
     const owner = this._recover(proposalId, raw)
     const record = { ...proposal, proposalId, confirmations: [{ owner, signature: raw, at: new Date().toISOString() }], createdAt: new Date().toISOString() }
     await this._store.set(proposalId, record)
-    this.events.push({ type: 'proposed', proposalId, owner })
     return record
   }
 
@@ -34,7 +35,6 @@ export default class LocalCoordinator extends IMultisigCoordinator {
     if (record.confirmations.some(c => c.owner === owner)) return record
     record.confirmations.push({ owner, signature, at: new Date().toISOString() })
     await this._store.set(proposalId, record)
-    this.events.push({ type: 'confirmed', proposalId, owner })
     return record
   }
 

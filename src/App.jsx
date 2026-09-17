@@ -3,8 +3,9 @@ import { BROWSER_SIGNERS, loadRemoteSigners } from './signers/catalog.js'
 import { ACTIONS, balanceOf, createWallet, loadAccounts, loadHistory, parseEther, parseUnits, shortAddress, shortBalance, tokenBalancesOf } from './lib/wallet.js'
 import { recipients, remember } from './lib/recipients.js'
 import { DEFAULT_NETWORK, DEFAULT_TESTNET, NETWORKS, networkOf, networksFor } from './lib/networks.js'
-import { errorDetails, when } from './lib/ui.js'
+import { errorDetails } from './lib/ui.js'
 import Log from './components/Log.jsx'
+import HistoryList from './components/HistoryList.jsx'
 import Multisig from './pages/Multisig.jsx'
 
 const TESTNET_KEY = 'wdk-signers-demo.testnet'
@@ -17,7 +18,6 @@ const PAGES = [
 ]
 const pageFromHash = () => PAGES.find(p => p.hash === window.location.hash)?.id ?? 'wallet'
 
-const DIRECTION = { in: { sign: '↓', label: 'Received' }, out: { sign: '↑', label: 'Sent' }, self: { sign: '↻', label: 'Self' } }
 
 const ACTION_LIST = [
   { name: 'signMessage', label: 'Sign message', icon: '✎' },
@@ -117,7 +117,7 @@ export default function App () {
       const list = await loadAccounts(handle)
       if (gen !== generation.current) return
       setAccounts(list)
-      remember(entry.id, list)
+      remember(entry.id, list, network.id)
       setPhase('ready')
       append({
         ok: true,
@@ -146,7 +146,10 @@ export default function App () {
   const switchNetwork = useCallback(async (id) => {
     setNetworkId(id)
     setNetSheet(false)
-    if (selected) await select(selected, networkOf(id))
+    if (!selected) return
+    // a signer without that network (Fireblocks off Sepolia) gives way to the seed, always there
+    const next = selected.networks?.includes(id) ? selected : BROWSER_SIGNERS.find(s => s.id === 'seed')
+    await select(next, networkOf(id))
   }, [selected, select])
 
   // the testnet toggle: off is the mainnet default, on is the testnet default; remembered per browser
@@ -176,7 +179,7 @@ export default function App () {
     const from = accounts[current]?.address
     const usdt = net.tokens[0] ?? null
     setSend({ targets: [], loading: true, to: null, toLabel: null, amount: usdt ? '1' : DEFAULT_AMOUNT, asset: usdt, gasless: Boolean(usdt && net.gasless && selected?.can?.signAuthorization !== false) })
-    const targets = await recipients(signers.filter(s => s.networks?.includes(net.id)), { exclude: from })
+    const targets = await recipients(signers.filter(s => s.networks?.includes(net.id)), { net, exclude: from })
     const first = targets.find(g => g.accounts.length)
     setSend(s => s && { ...s, targets, loading: false, to: first?.accounts[0].address ?? null, toLabel: first ? targetLabel(first, first.accounts[0]) : null })
   }, [accounts, current, signers, net, selected])
@@ -378,22 +381,7 @@ export default function App () {
               {historyView?.loading && <p className='muted'>Loading…</p>}
               {historyView?.error && <p className='warn'>{historyView.error}</p>}
               {historyView && !historyView.loading && !historyView.error && historyView.entries.length === 0 && <p className='muted'>No transaction yet on this address.</p>}
-              {historyView && !historyView.loading && historyView.entries.length > 0 && (
-                <ul>
-                  {historyView.entries.map(e => (
-                    <li key={e.id} className={`${e.direction} ${e.status}`}>
-                      <a href={e.link} target='_blank' rel='noreferrer'>
-                        <span className={`sign ${e.direction}`}>{DIRECTION[e.direction].sign}</span>
-                        <span className='main'>
-                          <span className='what'>{DIRECTION[e.direction].label} {e.kind}{e.status === 'failed' ? ' · failed' : e.status === 'pending' ? ' · pending' : ''}</span>
-                          <span className='sub'>{e.counterparty ? shortAddress(e.counterparty) : e.method || 'contract'} · {e.timestamp ? when(e.timestamp) : 'in the mempool'}</span>
-                        </span>
-                        <span className={`amt ${e.direction}`}>{e.direction === 'in' ? '+' : e.direction === 'out' ? '−' : ''}{shortBalance(e.amount)} {e.kind}</span>
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              {historyView && !historyView.loading && historyView.entries.length > 0 && <HistoryList entries={historyView.entries} />}
               {historyView && !historyView.loading && historyView.sources && (
                 <p className='sources'>
                   ETH via Blockscout{historyView.sources.blockscout !== 'ok' ? ` (${historyView.sources.blockscout})` : ''} · USDT via WDK indexer{historyView.sources.wdkIndexer !== 'ok' ? ` (${historyView.sources.wdkIndexer})` : ''}

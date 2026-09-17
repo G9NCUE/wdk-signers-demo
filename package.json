@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "test": "node --test tests/*.test.js",
     "test:live": "node --env-file=.env --test tests/live/*.test.js",
-    "test:browser": "node --test tests/browser/*.test.js"
+    "test:browser": "node --test --test-concurrency=1 tests/browser/*.test.js"
   },
   "dependencies": {
     "@dfns/sdk": "^0.8.29",
@@ -41,8 +41,6 @@
     "wdk-signer-turnkey-evm": "file:../wdk-signer-turnkey-evm"
   },
   "devDependencies": {
-    "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.7",
     "@vitejs/plugin-react": "^6.1.1",
     "concurrently": "^10.0.5",
     "oxlint": "^1.81.0",
