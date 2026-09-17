@@ -626,7 +626,8 @@ export default function Multisig ({ signers, net, append, serviceError }) {
       {transfer && safe && (
         <div className='modal-backdrop' onClick={() => setTransfer(null)}>
           <div className='modal' role='dialog' aria-label='New transfer' onClick={ev => ev.stopPropagation()}>
-            <h4 className='eyebrow'>New transfer from the Safe</h4>
+            <h4 className='eyebrow'>New transfer from the Safe {shortAddress(safe.address)}</h4>
+            <p className='muted small'>The funds leave the Safe. An owner only signs: the initiator below gives the first of the {safe.threshold} signatures, the others approve, any owner executes.</p>
             <div className='assets'>
               {[...net.tokens, { symbol: net.native, address: null }].map(asset => (
                 <button key={asset.symbol} className={`pill ${(transfer.asset?.address ?? null) === asset.address ? 'active' : ''}`} onClick={() => setTransfer(t => ({ ...t, asset: asset.address ? asset : null, amount: asset.address ? '0.1' : '0.0005' }))}>{asset.symbol}</button>
@@ -662,7 +663,7 @@ export default function Multisig ({ signers, net, append, serviceError }) {
               <span className='input'><input placeholder='0x…' value={transfer.custom} onChange={ev => { const v = ev.target.value.trim(); setTransfer(t => ({ ...t, custom: ev.target.value, ...(isAddress(v) ? { to: v, toLabel: null } : {}) })) }} /></span>
             </label>
             <div className='setup-row'>
-              <span className='eyebrow'>Proposed by</span>
+              <span className='eyebrow'>Initiator, signs first</span>
               <div className='assets'>
                 {safe.owners.map(o => <button key={keyOfOwner(o)} className={`pill ${sameOwner(transfer.as, o) ? 'active' : ''}`} onClick={() => setTransfer(t => ({ ...t, as: o }))}>{nameOf(o)}</button>)}
               </div>
