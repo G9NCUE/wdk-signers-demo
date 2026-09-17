@@ -13,6 +13,11 @@ export async function startService (registry, { log = () => {} } = {}) {
   }
 }
 
+// an entry as buildRegistry makes it: one root, offered on sepolia only unless said otherwise
 export function registryOf (entries) {
-  return new Map(entries.map(e => [e.id, { children: new Map(), available: true, reason: null, ...e }]))
+  return new Map(entries.map(e => {
+    const networks = e.networks ?? ['sepolia']
+    const roots = e.roots ?? Object.fromEntries(networks.map(n => [n, e.root]))
+    return [e.id, { children: new Map(), available: true, reason: null, networks, roots, ...e }]
+  }))
 }

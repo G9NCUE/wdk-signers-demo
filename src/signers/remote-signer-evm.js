@@ -7,9 +7,10 @@ import { parse, stringify } from '../lib/json.js'
 export default class RemoteSignerEvm extends ISigner {
   // lifecycle is shared by reference between a root and the children it derives: disposing the
   // root (what WalletManagerEvm.dispose does) ends every account derived from it
-  constructor ({ id, path, isDerivable, baseUrl = '/api', lifecycle } = {}) {
+  constructor ({ id, path, isDerivable, baseUrl = '/api', lifecycle, network } = {}) {
     super()
     this._id = id
+    this._network = network // the service picks the provider's root for this network, its default otherwise
     this._path = path
     this._isDerivable = isDerivable
     this._baseUrl = baseUrl
@@ -27,7 +28,7 @@ export default class RemoteSignerEvm extends ISigner {
   async derive (relPath) {
     if (!this.isDerivable) throw new InvalidSignerError('Cannot derive: this signer is a derived child.')
     const child = await this._call('derive', { relPath })
-    return new RemoteSignerEvm({ id: this._id, path: child.path, isDerivable: false, baseUrl: this._baseUrl, lifecycle: this._lifecycle })
+    return new RemoteSignerEvm({ id: this._id, path: child.path, isDerivable: false, baseUrl: this._baseUrl, lifecycle: this._lifecycle, network: this._network })
   }
 
   async getAddress () {
@@ -65,7 +66,7 @@ export default class RemoteSignerEvm extends ISigner {
     const res = await fetch(`${this._baseUrl}/signers/${this._id}/${op}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: stringify({ path: this._path, ...body })
+      body: stringify({ path: this._path, network: this._network, ...body })
     })
     const text = await res.text()
     if (!res.ok) {

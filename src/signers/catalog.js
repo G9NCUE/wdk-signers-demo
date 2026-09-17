@@ -88,6 +88,6 @@ export async function loadRemoteSigners () {
     key: 'remote',
     networks: networksOf(s.id),
     can: FULL,
-    build: async () => new RemoteSignerEvm({ id: s.id, path: s.path, isDerivable: s.isDerivable })
+    build: async (net) => new RemoteSignerEvm({ id: s.id, path: s.path, isDerivable: s.isDerivable, network: net?.id })
   }))
 }

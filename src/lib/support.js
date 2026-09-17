@@ -1,5 +1,6 @@
-// Which networks each signer can sign on in this demo. Browser and service keys are chain-agnostic;
-// Dfns wallets and Fireblocks vault assets are bound to one network by the service's .env.
+// Which networks each signer can sign on in this demo. Browser, Turnkey and Openfort keys are
+// chain-agnostic; Dfns gets one wallet per network on the same key; Fireblocks vault assets are per
+// network and the sandbox only has testnets.
 // Shared by the catalog (the picker) and the live tests (one flow per signer per network).
 export const SIGNER_NETWORKS = {
   seed: ['sepolia', 'arbitrum'],
@@ -7,8 +8,8 @@ export const SIGNER_NETWORKS = {
   metamask: ['sepolia', 'arbitrum'],
   turnkey: ['sepolia', 'arbitrum'],
   openfort: ['sepolia', 'arbitrum'],
-  dfns: ['sepolia'],
-  fireblocks: ['sepolia']
+  dfns: ['sepolia', 'arbitrum'], // one Dfns wallet per network, on the same derived keys
+  fireblocks: ['sepolia'] // the sandbox refuses mainnet assets (testMode), a real workspace would add arbitrum
 }
 
 export const networksOf = (signerId) => SIGNER_NETWORKS[signerId] ?? ['sepolia']

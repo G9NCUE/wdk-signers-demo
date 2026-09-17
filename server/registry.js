@@ -10,6 +10,8 @@ import { TurnkeySignerEvm } from 'wdk-signer-turnkey-evm'
 import { DfnsSignerEvm } from 'wdk-signer-dfns-evm'
 import { OpenfortSignerEvm } from 'wdk-signer-openfort-evm'
 import { FireblocksSignerEvm } from 'wdk-signer-fireblocks-evm'
+import { NETWORKS } from '../src/lib/networks.js'
+import { networksOf } from '../src/lib/support.js'
 
 const env = process.env
 const need = (...keys) => {
@@ -38,15 +40,17 @@ export const PROVIDERS = [
     id: 'dfns',
     label: 'Dfns',
     kind: 'MPC, wallet per derived key',
-    build () {
-      need('DFNS_AUTH_TOKEN', 'DFNS_CRED_ID', 'DFNS_MASTER_KEY_ID', 'DFNS_NETWORK')
+    // a Dfns wallet is bound to one network, so one root per network, all on the same derived keys
+    build (networkId) {
+      need('DFNS_AUTH_TOKEN', 'DFNS_CRED_ID', 'DFNS_MASTER_KEY_ID')
       const privateKey = env.DFNS_PRIVATE_KEY ?? readFileSync(mustHave('DFNS_PRIVATE_KEY_FILE'), 'utf8')
       const client = new DfnsApiClient({
         baseUrl: env.DFNS_API_URL || 'https://api.dfns.io',
         authToken: env.DFNS_AUTH_TOKEN,
         signer: new AsymmetricKeySigner({ credId: env.DFNS_CRED_ID, privateKey })
       })
-      return new DfnsSignerEvm({ client, masterKeyId: env.DFNS_MASTER_KEY_ID, network: env.DFNS_NETWORK })
+      const network = networkId ? NETWORKS[networkId].dfnsNetwork : (env.DFNS_NETWORK || 'EthereumSepolia')
+      return new DfnsSignerEvm({ client, masterKeyId: env.DFNS_MASTER_KEY_ID, network })
     }
   },
   {
@@ -81,14 +85,21 @@ function mustHave (key) {
   return env[key]
 }
 
+// one entry per provider: `root` is the default network's root, `roots` one per supported network
+// (the same object when the provider's key is chain-agnostic), children keyed by network and path
 export function buildRegistry () {
   const registry = new Map()
   for (const p of PROVIDERS) {
     try {
-      const root = p.build()
-      registry.set(p.id, { ...p, root, children: new Map(), available: true, reason: null })
+      const networks = networksOf(p.id)
+      const roots = {}
+      const perNetwork = p.build.length > 0
+      const shared = perNetwork ? null : p.build()
+      for (const id of networks) roots[id] = perNetwork ? p.build(id) : shared
+      const root = roots[networks[0]]
+      registry.set(p.id, { ...p, root, roots, networks, children: new Map(), available: true, reason: null })
     } catch (e) {
-      registry.set(p.id, { ...p, root: null, children: new Map(), available: false, reason: e.message })
+      registry.set(p.id, { ...p, root: null, roots: {}, networks: networksOf(p.id), children: new Map(), available: false, reason: e.message })
     }
   }
   return registry

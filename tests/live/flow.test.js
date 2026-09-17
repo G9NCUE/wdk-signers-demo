@@ -82,7 +82,7 @@ for (const net of networks) {
       if (!networksOf(id).includes(net.id)) return t.skip(`${id} is configured for ${networksOf(id).join(', ')} only`)
       const s = signers.find(x => x.id === id)
       if (!s?.available) return t.skip(`${id}: ${s?.reason ?? 'not in the registry'}`)
-      const signer = new RemoteSignerEvm({ id: s.id, path: s.path, isDerivable: s.isDerivable, baseUrl: service.baseUrl })
+      const signer = new RemoteSignerEvm({ id: s.id, path: s.path, isDerivable: s.isDerivable, baseUrl: service.baseUrl, network: net.id })
       const handle = createWallet(signer, net.id)
       let account
       if (s.isDerivable) {

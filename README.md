@@ -16,9 +16,9 @@ demo controls. A developer panel keeps every call with the bytes behind it.
 | Ledger | the device, WebHID | browser | [wdk-signer-ledger-evm](https://github.com/G9NCUE/wdk-signer-ledger-evm) | offline tests, device pending |
 | MetaMask | the extension, EIP-1193 | browser | [wdk-signer-eip1193-evm](https://github.com/G9NCUE/wdk-signer-eip1193-evm) | connected, see limits |
 | Turnkey | Turnkey HD wallet, policies | service | [wdk-signer-turnkey-evm](https://github.com/G9NCUE/wdk-signer-turnkey-evm) | yes |
-| Dfns | Dfns MPC, one wallet per derived key | service | [wdk-signer-dfns-evm](https://github.com/G9NCUE/wdk-signer-dfns-evm) | yes |
+| Dfns | Dfns MPC, one wallet per network on a derived key | service | [wdk-signer-dfns-evm](https://github.com/G9NCUE/wdk-signer-dfns-evm) | yes, both networks |
 | Openfort | Openfort TEE backend wallet | service | [wdk-signer-openfort-evm](https://github.com/G9NCUE/wdk-signer-openfort-evm) | yes |
-| Fireblocks | Fireblocks MPC vault account | service | [wdk-signer-fireblocks-evm](https://github.com/G9NCUE/wdk-signer-fireblocks-evm) | yes, sandbox |
+| Fireblocks | Fireblocks MPC vault account | service | [wdk-signer-fireblocks-evm](https://github.com/G9NCUE/wdk-signer-fireblocks-evm) | yes, sandbox, Sepolia only |
 
 ## Networks
 
@@ -29,8 +29,10 @@ the wallet is rebuilt on the other chain, balances and history follow. On Arbitr
 USDT0, and a USDT0 send defaults to **gasless**: the WDK's `wdk-wallet-evm-7702-gasless` module wraps
 the account, delegates it with an EIP-7702 authorization and sends a user operation through Candide's
 public bundler, gas paid in USDT0 by the paymaster. That works with every signer that signs an
-authorization, so all of them except MetaMask; Dfns and Fireblocks are bound to Sepolia by their
-service configuration and stay greyed out on Arbitrum. `src/lib/networks.js` holds the table.
+authorization, so all of them except MetaMask. Dfns gets one wallet per network on the same derived
+key (same address on both chains); Fireblocks stays on Sepolia because its sandbox refuses mainnet
+assets, and is greyed out on Arbitrum. `src/lib/networks.js` holds the network table,
+`src/lib/support.js` says which signer runs where.
 
 Derivable signers (seed, Ledger, Turnkey, Dfns) show accounts 0 to 2 at `m/44'/60'/0'/0/i`.
 Single-key signers (MetaMask, Openfort, Fireblocks) are registered by name with `wallet.addSigner()`

@@ -19,8 +19,8 @@ export function createApp (registry, { log = console.error } = {}) {
   })
 
   app.get('/api/signers', (c) => {
-    const list = [...registry.values()].map(({ id, label, kind, available, reason, root }) => ({
-      id, label, kind, available, reason, isDerivable: root ? root.isDerivable : null, path: root?.path ?? null
+    const list = [...registry.values()].map(({ id, label, kind, available, reason, root, networks }) => ({
+      id, label, kind, available, reason, networks, isDerivable: root ? root.isDerivable : null, path: root?.path ?? null
     }))
     return c.json(list)
   })
@@ -32,9 +32,11 @@ export function createApp (registry, { log = console.error } = {}) {
     if (!entry) return c.json({ error: 'unknown signer' }, 404)
     if (!entry.available) return c.json({ error: entry.reason }, 503)
     const body = parse(await c.req.text())
+    const network = body.network ?? entry.networks[0]
+    if (!entry.roots[network]) return c.json({ error: `${entry.id} is not configured for ${network}` }, 400)
     try {
-      const signer = await resolve(entry, body.path)
-      const result = await run(entry, signer, c.req.param('op'), body)
+      const signer = await resolve(entry, network, body.path)
+      const result = await run(entry, network, signer, c.req.param('op'), body)
       return c.body(stringify(result), 200, { 'content-type': 'application/json' })
     } catch (e) {
       log(`[${entry.id}] ${c.req.param('op')}: ${e.message}`)
@@ -45,18 +47,19 @@ export function createApp (registry, { log = console.error } = {}) {
   return app
 }
 
-async function resolve (entry, path) {
-  if (!path || path === entry.root.path) return entry.root
-  const child = entry.children.get(path)
-  if (!child) throw new Error(`unknown derived path ${path}, call derive first`)
+async function resolve (entry, network, path) {
+  const root = entry.roots[network]
+  if (!path || path === root.path) return root
+  const child = entry.children.get(`${network}:${path}`)
+  if (!child) throw new Error(`unknown derived path ${path} on ${network}, call derive first`)
   return child
 }
 
-async function run (entry, signer, op, body) {
+async function run (entry, network, signer, op, body) {
   switch (op) {
     case 'derive': {
-      const child = await entry.root.derive(body.relPath)
-      entry.children.set(child.path, child)
+      const child = await entry.roots[network].derive(body.relPath)
+      entry.children.set(`${network}:${child.path}`, child)
       return { path: child.path }
     }
     case 'address': {
