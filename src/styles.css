@@ -342,6 +342,8 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 .flow .arrow.done::after { border-left-color: var(--accent); }
 .step { flex: 1; display: flex; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--card); min-width: 0; }
 .step.done { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+.step.expired { border-color: color-mix(in srgb, var(--error) 50%, var(--line)); }
+.tl-item.expired .tl-dot { background: var(--error); border-color: var(--error); }
 .step .num { flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font: 600 12px/1 var(--font-mono); background: var(--surface); border: 1px solid var(--line-subtle); color: var(--secondary); }
 .step.done .num { background: var(--accent); border-color: var(--accent); color: #fff; }
 .step-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }

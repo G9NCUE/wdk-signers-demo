@@ -16,6 +16,7 @@ import SafeOwnerAccount from '../src/lib/safe/owner-account.js'
 import { predictSafeAddress, safeConfigOf } from '../src/lib/safe/config.js'
 import LocalCoordinator, { proposerSignatureOf } from '../src/lib/safe/local-coordinator.js'
 import { registryOf, startService } from './helpers/service.js'
+import { expiryOf, sponsorshipOf } from '../src/lib/safe/paymaster.js'
 
 const MNEMONIC = 'test test test test test test test test test test test junk'
 const key = (i) => HDNodeWallet.fromPhrase(MNEMONIC, undefined, `m/44'/60'/0'/0/${i}`)
@@ -137,6 +138,31 @@ test('execution is recorded by the page and the module reads it as executed; the
   } finally {
     await again.close()
   }
+})
+
+// Candide's token paymaster data as stored on 2026-09-17 for a proposal created at 08:40:31Z
+const CANDIDE = '0x36f4aa64673568782461bf03c75462f8ef0a1b7600000100006aaba8330000000000000000000000000000000000000000000000000000000091a52800bb0e759e38627ad53b65a5a9cc2725b35dcdd97150ff37da610b846b02319cd22508cc779bd6e06e6918f2b29eabdba39d86a7e978ac6e886b10de4e669256791c'
+
+test('the paymaster sponsorship has a three-minute deadline, read from paymasterAndData, and a proposal past it is expired', async () => {
+  const { paymaster, validUntil } = sponsorshipOf(CANDIDE)
+  assert.equal(paymaster, '0x36f4aa64673568782461bf03c75462f8ef0a1b76')
+  assert.equal(validUntil.toISOString(), '2026-09-17T08:43:31.000Z', 'created 08:40:31Z, valid three minutes')
+  assert.deepEqual(expiryOf({ paymasterAndData: CANDIDE }, Date.parse('2026-09-17T08:42:00Z')), { expiresAt: '2026-09-17T08:43:31.000Z', expired: false })
+  assert.equal(expiryOf({ paymasterAndData: CANDIDE }, Date.parse('2026-09-17T09:21:00Z')).expired, true)
+  assert.deepEqual(expiryOf({ paymasterAndData: '0x' }), { expiresAt: null, expired: false }, 'no paymaster, no deadline')
+  assert.deepEqual(sponsorshipOf(undefined), { paymaster: null, validUntil: null })
+
+  // through the service: an old sponsorship makes the proposal expired even with the threshold met
+  const c = coordinator()
+  const id = keccak256(toUtf8Bytes('stale'))
+  const stale = proposalOf(id, 0)
+  stale.userOperation.paymasterAndData = CANDIDE
+  const proposed = await c.submitProposal(id, stale)
+  assert.equal(proposed.status, 'expired')
+  assert.equal(proposed.expiresAt, '2026-09-17T08:43:31.000Z')
+  const confirmed = await c.confirmProposal(id, signDigest(4, id))
+  assert.equal(confirmed.status, 'expired', 'two signatures do not revive it')
+  assert.equal((await c.listProposals()).find(p => p.proposalId === id).status, 'expired')
 })
 
 test('messages go through the same three calls', async () => {

@@ -10,6 +10,7 @@ import { NETWORKS } from '../src/lib/networks.js'
 import { networksOf } from '../src/lib/support.js'
 import { deterministicSalt, normaliseOwners, predictSafeAddress } from '../src/lib/safe/config.js'
 import LocalCoordinator from '../src/lib/safe/local-coordinator.js'
+import { expiryOf } from '../src/lib/safe/paymaster.js'
 import { parse, stringify } from '../src/lib/json.js'
 import SafeFileStore from './safe/store.js'
 
@@ -95,11 +96,14 @@ export function createSafeRoutes ({ dir, log = console.error }) {
       return o ? { signerId: o.signerId, index: o.index } : { signerId: null, index: null }
     }
     const first = record.confirmations[0]
+    // the paymaster's sponsorship has a deadline; past it the signed operation cannot be sent
+    const { expiresAt, expired } = expiryOf(record.userOperation)
     return {
       ...record,
       confirmations: record.confirmations.map(x => ({ ...x, ...who(x.owner) })),
       proposedBy: first ? { owner: first.owner, ...who(first.owner), at: first.at } : null,
-      status: record.execution ? 'executed' : record.confirmations.length >= (safe?.threshold ?? Infinity) ? 'ready' : 'pending'
+      expiresAt,
+      status: record.execution ? 'executed' : expired ? 'expired' : record.confirmations.length >= (safe?.threshold ?? Infinity) ? 'ready' : 'pending'
     }
   }
 

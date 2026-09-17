@@ -57,6 +57,7 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
   const chain = safe && chainOf.address === safe.address ? chainOf.value : null
   const [selectedId, setSelectedId] = useState(null)
   const [opened, setOpened] = useState(null) // an executed proposal whose detail the user asked for
+  const [now, setNow] = useState(() => Date.now())
   const [ownersOn, setOwnersOn] = useState({ net: null, map: {} }) // "signer:index" -> { phase, address, error }
   const owners = useMemo(() => (ownersOn.net === net.id ? ownersOn.map : {}), [ownersOn, net.id])
   const setOwners = useCallback((update) => setOwnersOn(o => ({ net: net.id, map: update(o.net === net.id ? o.map : {}) })), [net.id])
@@ -368,11 +369,13 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
   }, [coordinator, safe, net, append, refreshSafe, configId])
 
   // recipients: the Safe's own owners (the money goes back to one of the signers), or any address
-  const openTransfer = useCallback((as) => {
+  const openTransfer = useCallback((as, again = null) => {
     const asset = net.safe.paymasterToken
     const proposer = as ?? safe.owners.find(o => owners[keyOfOwner(o)]?.phase === 'ready') ?? safe.owners[0]
     const first = sortOwners(safe.owners, configOrder)[0]
-    setTransfer({ asset, amount: '0.1', to: first.address, toLabel: nameOf(first), custom: '', as: proposer })
+    const to = again?.recipient ?? first.address
+    const known = safe.owners.find(o => o.address.toLowerCase() === to.toLowerCase())
+    setTransfer({ asset, amount: again?.amount ?? '0.1', to, toLabel: known ? nameOf(known) : (again?.toLabel ?? null), custom: known ? '' : to, as: proposer })
   }, [net, safe, owners, configOrder]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const copy = useCallback(async (text, tag) => {
@@ -383,8 +386,20 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
   const selected = proposals.find(p => p.proposalId === selectedId) ?? null
   const token = net.safe?.paymasterToken
   const held = balances?.tokens?.find(t => t.symbol === token?.symbol)?.balance
-  // the owners only carry a role while a proposal is in flight; once executed they are idle again
-  const active = selected && !selected.execution ? selected : null
+  // the owners only carry a role while a proposal is in flight; executed or expired, they are idle again
+  const active = selected && !selected.execution && selected.status !== 'expired' ? selected : null
+  const deadline = active?.expiresAt ? Date.parse(active.expiresAt) : null
+  const secondsLeft = deadline ? Math.max(0, Math.round((deadline - now) / 1000)) : null
+  // a clock while the sponsorship runs out; past the deadline the service says 'expired'
+  const activeDeadline = active?.expiresAt ?? null
+  useEffect(() => {
+    if (!activeDeadline) return
+    const id = setInterval(() => {
+      setNow(Date.now())
+      if (Date.parse(activeDeadline) <= Date.now()) { clearInterval(id); refreshProposals() }
+    }, 1000)
+    return () => clearInterval(id)
+  }, [activeDeadline, refreshProposals])
   const roleOf = (o) => {
     if (!active) return null
     return {
@@ -624,12 +639,21 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
             const steps = [
               { title: 'Proposed', done: Boolean(p), who: p?.proposedBy, sub: p ? `${p.meta?.amount ?? ''} ${p.meta?.asset ?? ''} to ${p.meta?.toLabel ?? shortAddress(p.meta?.recipient ?? '')}` : 'any owner proposes and signs first' },
               { title: `Approved (${n} of ${safe.threshold})`, done: n >= safe.threshold, who: null, sub: p ? (n >= safe.threshold ? 'threshold met' : `needs ${safe.threshold - n} more owner${safe.threshold - n > 1 ? 's' : ''}`) : 'other owners add their signature' },
-              { title: 'Executed', done: Boolean(p?.execution), who: p?.execution?.by, sub: p?.execution ? (p.execution.txHash ? 'mined' : 'sent to the bundler') : (n >= safe.threshold ? 'any owner can execute' : 'after the threshold') }
+              {
+                title: 'Executed',
+                done: Boolean(p?.execution),
+                who: p?.execution?.by,
+                sub: p?.execution
+                  ? (p.execution.txHash ? 'mined' : 'sent to the bundler')
+                  : p?.status === 'expired'
+                    ? `sponsorship expired at ${when(p.expiresAt)}, re-propose`
+                    : (n >= safe.threshold ? 'any owner can execute' : 'after the threshold') + (secondsLeft !== null ? `, paymaster sponsorship valid for ${secondsLeft} s` : '')
+              }
             ]
             return steps.map((s, i) => (
               <div key={s.title} className='flow-item'>
                 {i > 0 && <span className={`arrow ${steps[i - 1].done ? 'done' : ''}`} aria-hidden='true' />}
-                <div className={`step ${s.done ? 'done' : ''}`}>
+                <div className={`step ${s.done ? 'done' : ''} ${i === 2 && p?.status === 'expired' ? 'expired' : ''}`}>
                   <span className='num'>{i + 1}</span>
                   <div className='step-body'>
                     <div className='step-title'>{s.title}</div>
@@ -668,7 +692,7 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
                     <span className='sub'>{short(p.proposalId, 12)} · by {nameOf(p.proposedBy)} · {when(p.createdAt)}</span>
                   </span>
                   <span className='confs'>{p.confirmations.map(c => custodyPill(c, c.owner))}<span className='muted small'>{p.confirmations.length}/{safe.threshold}</span></span>
-                  <span className={`status-pill ${p.status === 'executed' ? 'ok' : p.status === 'ready' ? 'warn' : 'plain'}`}>{p.status}</span>
+                  <span className={`status-pill ${p.status === 'executed' ? 'ok' : p.status === 'ready' ? 'warn' : p.status === 'expired' ? 'bad' : 'plain'}`}>{p.status}</span>
                 </button>
                 {p.proposalId === selectedId && (!p.execution || opened === p.proposalId) && detailOf(p)}
               </li>
