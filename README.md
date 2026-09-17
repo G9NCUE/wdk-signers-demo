@@ -20,6 +20,17 @@ demo controls. A developer panel keeps every call with the bytes behind it.
 | Openfort | Openfort TEE backend wallet | service | [wdk-signer-openfort-evm](https://github.com/G9NCUE/wdk-signer-openfort-evm) | yes |
 | Fireblocks | Fireblocks MPC vault account | service | [wdk-signer-fireblocks-evm](https://github.com/G9NCUE/wdk-signer-fireblocks-evm) | yes, sandbox |
 
+## Networks
+
+The network pill on the balance card switches between **Sepolia** (testnet, the default) and
+**Arbitrum One** (mainnet). The signer stays, the wallet is rebuilt on the other chain, balances and
+history follow. On Arbitrum the card also shows the **USDT0** balance, the send sheet offers ETH or
+USDT0, and a USDT0 send defaults to **gasless**: the WDK's `wdk-wallet-evm-7702-gasless` module wraps
+the account, delegates it with an EIP-7702 authorization and sends a user operation through Candide's
+public bundler, gas paid in USDT0 by the paymaster. That works with every signer that signs an
+authorization, so all of them except MetaMask; Dfns and Fireblocks are bound to Sepolia by their
+service configuration and stay greyed out on Arbitrum. `src/lib/networks.js` holds the table.
+
 Derivable signers (seed, Ledger, Turnkey, Dfns) show accounts 0 to 2 at `m/44'/60'/0'/0/i`.
 Single-key signers (MetaMask, Openfort, Fireblocks) are registered by name with `wallet.addSigner()`
 and show one account. Every package implements the `ISignerEvm` contract of `wdk-wallet-evm`
@@ -52,7 +63,8 @@ src/
   App.jsx                        the phone, the picker and send sheets, the developer log
   signers/catalog.js             the seven signers, browser ones built in place
   signers/remote-signer-evm.js   ISigner whose calls go to the service
-  lib/wallet.js                  WalletManagerEvm per signer, accounts, balances, the three actions
+  lib/wallet.js                  WalletManagerEvm per signer, accounts, balances, the three actions, the 7702 gasless route
+  lib/networks.js                Sepolia and Arbitrum: RPC, explorer, history sources, tokens, gasless config
   lib/recipients.js              the other demo accounts, as send targets
 server/
   registry.js                    one root signer per provider, built from .env
@@ -103,7 +115,7 @@ npm run test:live     # every provider configured in .env, service in-process: b
                       # unconfigured providers skip, a provider quota skips with the reason
 npm run test:browser  # the phone in Chrome (Playwright, `chrome` channel) with `npm run dev` up:
                       # picker, accounts, balances, history, sign message, sign tx, the send sheet
-                      # cancelled; DEMO_SIGNER=Openfort picks another signer
+                      # cancelled, the switch to Arbitrum and back; DEMO_SIGNER=Openfort picks another signer
 ```
 
 Ledger and MetaMask need a device or an extension in a headed browser and stay manual.

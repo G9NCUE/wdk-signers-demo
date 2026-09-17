@@ -22,8 +22,9 @@
     "@ledgerhq/device-signer-kit-ethereum": "^1.18.0",
     "@ledgerhq/device-transport-kit-web-hid": "^1.2.4",
     "@openfort/openfort-node": "^0.12.2",
-    "@tetherto/wdk-wallet": "^1.0.0-beta.17",
-    "@tetherto/wdk-wallet-evm": "^1.0.0-beta.18",
+    "@tetherto/wdk-wallet": "1.0.0-beta.17",
+    "@tetherto/wdk-wallet-evm": "1.0.0-beta.18",
+    "@tetherto/wdk-wallet-evm-7702-gasless": "^1.0.0-beta.5",
     "@turnkey/sdk-server": "^8.4.0",
     "ethers": "^6.17.0",
     "hono": "^4.13.8",
@@ -52,5 +53,9 @@
     "type": "git",
     "url": "https://github.com/G9NCUE/wdk-signers-demo"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "overrides": {
+    "@tetherto/wdk-wallet-evm": "1.0.0-beta.18",
+    "@tetherto/wdk-wallet": "1.0.0-beta.17"
+  }
 }

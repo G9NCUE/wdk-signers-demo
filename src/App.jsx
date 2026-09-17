@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { BROWSER_SIGNERS, loadRemoteSigners } from './signers/catalog.js'
-import { ACTIONS, EXPLORER, balanceOf, createWallet, formatDetails, loadAccounts, loadHistory, parseEther, shortAddress, shortBalance } from './lib/wallet.js'
+import { ACTIONS, balanceOf, createWallet, formatDetails, loadAccounts, loadHistory, parseEther, parseUnits, shortAddress, shortBalance, tokenBalancesOf } from './lib/wallet.js'
 import { recipients, remember } from './lib/recipients.js'
+import { DEFAULT_NETWORK, NETWORKS, networkOf } from './lib/networks.js'
 
 const DIRECTION = { in: { sign: '↓', label: 'Received' }, out: { sign: '↑', label: 'Sent' }, self: { sign: '↻', label: 'Self' } }
 
@@ -46,7 +47,10 @@ export default function App () {
   const [copied, setCopied] = useState(false)
   const [history, setHistory] = useState(null)
   const [historyTick, setHistoryTick] = useState(0)
-  const [send, setSend] = useState(null) // { targets, loading, to, toLabel, amount }
+  const [send, setSend] = useState(null) // { targets, loading, to, toLabel, amount, asset, gasless }
+  const [networkId, setNetworkId] = useState(DEFAULT_NETWORK)
+  const [netSheet, setNetSheet] = useState(false)
+  const net = networkOf(networkId)
   const walletRef = useRef(null)
   const nextId = useRef(0)
 
@@ -64,17 +68,21 @@ export default function App () {
     setExpanded(s => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
   }, [])
 
-  const refreshBalances = useCallback(async (list) => {
+  const refreshBalances = useCallback(async (list, network = net) => {
     const withBalances = await Promise.all(list.map(async (a) => {
-      try { return { ...a, balance: await balanceOf(a.account) } } catch (e) { return { ...a, balance: `error: ${e.message}` } }
+      try {
+        const [balance, tokens] = await Promise.all([balanceOf(a.account), tokenBalancesOf(a.account, network)])
+        return { ...a, balance, tokens }
+      } catch (e) { return { ...a, balance: `error: ${e.message}`, tokens: [] } }
     }))
     setAccounts(withBalances)
-  }, [])
+  }, [net])
 
   // switching signer disposes the previous wallet and rebuilds accounts and balances
-  const select = useCallback(async (entry) => {
+  const select = useCallback(async (entry, network = net) => {
     if (!entry.available) return
     setSheet(false)
+    setNetSheet(false)
     walletRef.current?.wallet.dispose()
     walletRef.current = null
     setSelected(entry)
@@ -84,8 +92,8 @@ export default function App () {
     setShowSecret(false)
     setPhase('connecting')
     try {
-      const signer = await entry.build()
-      const handle = createWallet(signer)
+      const signer = await entry.build(network)
+      const handle = createWallet(signer, network.id)
       walletRef.current = handle
       const list = await loadAccounts(handle)
       setAccounts(list)
@@ -94,23 +102,30 @@ export default function App () {
       append({
         ok: true,
         signer: entry.label,
-        text: `${list.length} account${list.length > 1 ? 's' : ''} resolved`,
-        details: { signer: entry.id, where: entry.where, accounts: list.map(a => ({ index: a.index, path: a.path, address: a.address })) }
+        text: `${list.length} account${list.length > 1 ? 's' : ''} resolved on ${network.label}`,
+        details: { signer: entry.id, where: entry.where, network: network.id, chainId: network.chainId, accounts: list.map(a => ({ index: a.index, path: a.path, address: a.address })) }
       })
-      await refreshBalances(list)
+      await refreshBalances(list, network)
     } catch (e) {
       setPhase('error')
       setError(e.message)
       append({ ok: false, signer: entry.label, text: e.message, details: errorDetails(e) })
     }
-  }, [append, refreshBalances])
+  }, [append, refreshBalances, net])
+
+  // switching network keeps the signer and rebuilds the wallet on the other chain
+  const switchNetwork = useCallback(async (id) => {
+    setNetworkId(id)
+    setNetSheet(false)
+    if (selected) await select(selected, networkOf(id))
+  }, [selected, select])
 
   const run = useCallback(async (name, args) => {
     const entry = accounts[current]
     if (!entry) return
     setBusy(name)
     try {
-      const result = await ACTIONS[name](entry.account, walletRef.current?.signer, args)
+      const result = await ACTIONS[name](entry.account, walletRef.current?.signer, { net, ...args })
       append({ ...result, signer: selected.label, account: entry.index })
       if (name === 'send') setTimeout(() => { refreshBalances(accounts); setHistoryTick(t => t + 1) }, 15000)
     } catch (e) {
@@ -118,21 +133,22 @@ export default function App () {
     } finally {
       setBusy(null)
     }
-  }, [accounts, current, selected, append, refreshBalances])
+  }, [accounts, current, selected, append, refreshBalances, net])
 
   // the send sheet: the other accounts the demo controls, resolved once, the current sender excluded
   const openSend = useCallback(async () => {
     const from = accounts[current]?.address
-    setSend({ targets: [], loading: true, to: null, toLabel: null, amount: DEFAULT_AMOUNT })
-    const targets = await recipients(signers, { exclude: from })
+    const usdt = net.tokens[0] ?? null
+    setSend({ targets: [], loading: true, to: null, toLabel: null, amount: usdt ? '1' : DEFAULT_AMOUNT, asset: usdt, gasless: Boolean(usdt && net.gasless && selected?.can?.signAuthorization !== false) })
+    const targets = await recipients(signers.filter(s => s.networks?.includes(net.id)), { exclude: from })
     const first = targets.find(g => g.accounts.length)
     setSend(s => s && { ...s, targets, loading: false, to: first?.accounts[0].address ?? null, toLabel: first ? targetLabel(first, first.accounts[0]) : null })
-  }, [accounts, current, signers])
+  }, [accounts, current, signers, net, selected])
 
   const confirmSend = useCallback(async () => {
     let value
-    try { value = parseEther(send.amount || '0') } catch { return append({ ok: false, signer: selected.label, text: `bad amount: ${send.amount}` }) }
-    const args = { to: send.to, toLabel: send.toLabel, value }
+    try { value = send.asset ? parseUnits(send.amount || '0', send.asset.decimals) : parseEther(send.amount || '0') } catch { return append({ ok: false, signer: selected.label, text: `bad amount: ${send.amount}` }) }
+    const args = { to: send.to, toLabel: send.toLabel, value, asset: send.asset, gasless: send.gasless }
     setSend(null)
     await run('send', args)
   }, [send, run, append, selected])
@@ -149,13 +165,13 @@ export default function App () {
   useEffect(() => {
     if (!account?.address) return
     let alive = true
-    loadHistory(account.address)
-      .then(h => alive && setHistory({ ...h, tick: historyTick }))
+    loadHistory(account.address, 20, net.id)
+      .then(h => alive && setHistory({ ...h, tick: historyTick, network: net.id }))
       .catch(e => alive && setHistory({ error: e.message, address: account.address, entries: [], tick: historyTick }))
     return () => { alive = false }
-  }, [account?.address, historyTick])
+  }, [account?.address, historyTick, net.id])
   const historyView = account
-    ? (history && history.address === account.address && history.tick === historyTick ? history : { loading: true })
+    ? (history && history.address === account.address && history.tick === historyTick && history.network === net.id ? history : { loading: true })
     : null
 
   return (
@@ -212,19 +228,24 @@ export default function App () {
             <section className={`tile ${phase}`}>
               <div className='tile-top'>
                 <span className='tile-label'>{account ? (selected.isDerivable === false ? 'Account' : `Account ${account.index}`) : selected ? selected.label : 'Wallet'}</span>
-                <span className='status-pill plain'>Sepolia</span>
+                <button className={`status-pill ${net.testnet ? 'plain' : 'warn'} as-button`} onClick={() => setNetSheet(true)} aria-haspopup='dialog' title='switch network'>{net.label}</button>
               </div>
               <div className='tile-value' title={account?.balance ?? ''}>
                 {phase === 'connecting' ? <span className='skeleton' /> : balance ?? '—'}
-                {balance !== null && phase === 'ready' && <span className='unit'>ETH</span>}
+                {balance !== null && phase === 'ready' && <span className='unit'>{net.native}</span>}
               </div>
+              {account?.tokens?.length > 0 && (
+                <div className='tokens'>
+                  {account.tokens.map(t => <span key={t.address} className='token'><b>{shortBalance(t.balance) ?? '…'}</b> {t.symbol}</span>)}
+                </div>
+              )}
               <div className='addr'>
                 {account
                   ? (
                     <>
                       <code title={account.address}>{shortAddress(account.address)}</code>
                       <button className='mini' onClick={() => copy(account.address)}>{copied ? 'copied' : 'copy'}</button>
-                      <a className='mini' href={`${EXPLORER}/address/${account.address}`} target='_blank' rel='noreferrer'>explorer</a>
+                      <a className='mini' href={`${net.explorer}/address/${account.address}`} target='_blank' rel='noreferrer'>explorer</a>
                     </>
                     )
                   : <span>{phase === 'connecting' ? 'connecting…' : phase === 'error' ? 'could not connect' : 'no signer selected'}</span>}
@@ -236,7 +257,7 @@ export default function App () {
               <div className='pills'>
                 {accounts.map((a, i) => (
                   <button key={a.index} className={`pill ${i === current ? 'active' : ''}`} onClick={() => setCurrent(i)} title={a.address}>
-                    #{a.index} <span>{shortBalance(a.balance) ?? '…'}</span>
+                    #{a.index} <span>{shortBalance(a.balance) ?? '…'}{a.tokens?.[0] ? ` · ${shortBalance(a.tokens[0].balance)} ${a.tokens[0].symbol}` : ''}</span>
                   </button>
                 ))}
               </div>
@@ -313,11 +334,12 @@ export default function App () {
                   <ul className='signers'>
                     {signers.map(s => (
                       <li key={s.id}>
-                        <button className={`signer ${selected?.id === s.id ? 'active' : ''} ${s.available ? '' : 'off'}`} onClick={() => select(s)} disabled={!s.available}>
+                        <button className={`signer ${selected?.id === s.id ? 'active' : ''} ${s.available && s.networks?.includes(net.id) ? '' : 'off'}`} onClick={() => select(s)} disabled={!s.available || !s.networks?.includes(net.id)}>
                           <span className='label'>{s.label}</span>
                           <span className={`where ${s.key}`} title={s.where === 'service' ? 'signs through the local service' : 'signs in the browser'}>{s.key}</span>
                           <span className='kind'>{s.kind}</span>
                           {!s.available && <span className='reason'>{s.reason}</span>}
+                          {s.available && !s.networks?.includes(net.id) && <span className='reason'>not configured for {net.label}, switch to {s.networks.map(id => NETWORKS[id].label).join(' or ')}</span>}
                         </button>
                       </li>
                     ))}
@@ -326,19 +348,60 @@ export default function App () {
                 </div>
               </div>
             )}
+            {netSheet && (
+              <div className='sheet-backdrop' onClick={() => setNetSheet(false)}>
+                <div className='sheet' role='dialog' aria-label='Choose a network' onClick={ev => ev.stopPropagation()}>
+                  <div className='grip' />
+                  <h4 className='eyebrow'>Network</h4>
+                  <ul className='signers'>
+                    {Object.values(NETWORKS).map(n => {
+                      const supported = !selected || selected.networks?.includes(n.id)
+                      return (
+                        <li key={n.id}>
+                          <button className={`signer ${n.id === net.id ? 'active' : ''} ${supported ? '' : 'off'}`} disabled={!supported || phase === 'connecting'} onClick={() => switchNetwork(n.id)}>
+                            <span className='label'>{n.label}</span>
+                            <span className={`where ${n.testnet ? 'local' : 'remote'}`}>{n.testnet ? 'testnet' : 'mainnet'}</span>
+                            <span className='kind'>chain {n.chainId}{n.tokens.length ? `, ${n.tokens.map(t => t.symbol).join(', ')}` : ''}{n.gasless ? ', gasless in ' + n.gasless.paymasterToken.symbol : ''}</span>
+                            {!supported && <span className='reason'>{selected.label} is configured for {selected.networks.map(id => NETWORKS[id].label).join(', ')} only</span>}
+                          </button>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </div>
+              </div>
+            )}
             {send && (
               <div className='sheet-backdrop' onClick={() => setSend(null)}>
                 <div className='sheet' role='dialog' aria-label='Send' onClick={ev => ev.stopPropagation()}>
                   <div className='grip' />
                   <h4 className='eyebrow'>Send from {selected.label}{account?.index !== undefined ? ` #${account.index}` : ''}</h4>
+                  {net.tokens.length > 0 && (
+                    <div className='assets'>
+                      {[{ symbol: net.native, address: null }, ...net.tokens].map(asset => (
+                        <button key={asset.symbol} className={`pill ${(send.asset?.address ?? null) === asset.address ? 'active' : ''}`} onClick={() => setSend(s => ({ ...s, asset: asset.address ? asset : null, amount: asset.address ? '1' : DEFAULT_AMOUNT, gasless: Boolean(asset.address && net.gasless && selected?.can?.signAuthorization !== false) }))}>
+                          {asset.symbol}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <label className='field'>
                     <span className='eyebrow'>Amount</span>
                     <span className='input'>
                       <input inputMode='decimal' value={send.amount} onChange={ev => setSend(s => ({ ...s, amount: ev.target.value }))} />
-                      <span className='unit'>ETH</span>
+                      <span className='unit'>{send.asset ? send.asset.symbol : net.native}</span>
                     </span>
-                    <span className='muted small'>balance {shortBalance(account?.balance) ?? '…'} ETH, gas on top</span>
+                    <span className='muted small'>
+                      balance {send.asset ? `${shortBalance(account?.tokens?.find(t => t.address === send.asset.address)?.balance) ?? '…'} ${send.asset.symbol}` : `${shortBalance(account?.balance) ?? '…'} ${net.native}`}{send.gasless ? `, gas paid in ${send.asset.symbol}` : `, gas in ${net.native} on top`}
+                    </span>
                   </label>
+                  {send.asset && net.gasless && (
+                    <label className={`switch ${selected?.can?.signAuthorization === false ? 'off' : ''}`} title={selected?.can?.signAuthorization === false ? `${selected.label} cannot sign the EIP-7702 authorization` : ''}>
+                      <input type='checkbox' checked={send.gasless} disabled={selected?.can?.signAuthorization === false} onChange={ev => setSend(s => ({ ...s, gasless: ev.target.checked }))} />
+                      <span className='knob' aria-hidden='true' />
+                      <span>Gasless: pay gas in {net.gasless.paymasterToken.symbol} through the 7702 account and the paymaster</span>
+                    </label>
+                  )}
                   <div className='eyebrow'>To, another account of this demo</div>
                   {send.loading && <p className='muted'>Resolving the other signers' accounts…</p>}
                   {!send.loading && !send.targets.some(g => g.accounts.length) && <p className='muted'>No other account available. Connect Ledger or MetaMask, or configure a provider.</p>}
@@ -359,7 +422,7 @@ export default function App () {
                   </ul>
                   <div className='sheet-actions'>
                     <button className='btn' onClick={() => setSend(null)}>Cancel</button>
-                    <button className='btn primary' disabled={!send.to || send.loading} onClick={confirmSend}>Send {send.amount || '0'} ETH{send.toLabel ? ` to ${send.toLabel}` : ''}</button>
+                    <button className='btn primary' disabled={!send.to || send.loading} onClick={confirmSend}>Send {send.amount || '0'} {send.asset ? send.asset.symbol : net.native}{send.toLabel ? ` to ${send.toLabel}` : ''}{send.gasless ? ', gasless' : ''}</button>
                   </div>
                 </div>
               </div>

@@ -33,6 +33,7 @@ export const BROWSER_SIGNERS = [
     kind: 'in the browser, WDK SeedSignerEvm',
     where: 'browser',
     key: 'local',
+    networks: ['sepolia', 'arbitrum'],
     available: true,
     isDerivable: true,
     can: FULL,
@@ -45,6 +46,7 @@ export const BROWSER_SIGNERS = [
     kind: 'hardware, WebHID, wdk-signer-ledger-evm',
     where: 'browser',
     key: 'hardware',
+    networks: ['sepolia', 'arbitrum'],
     prompts: true, // opens the device picker, never built silently
     available: typeof navigator !== 'undefined' && 'hid' in navigator,
     reason: 'WebHID is not available in this browser, use Chrome or Edge',
@@ -58,13 +60,14 @@ export const BROWSER_SIGNERS = [
     kind: 'injected wallet, EIP-1193, wdk-signer-eip1193-evm',
     where: 'browser',
     key: 'extension',
+    networks: ['sepolia', 'arbitrum'],
     prompts: true, // opens the wallet's connect prompt, never built silently
     available: Eip1193SignerEvm.isAvailable(globalThis),
     reason: 'no injected wallet found, install MetaMask, Rabby or Coinbase Wallet',
     isDerivable: false,
     // the wallet signs and broadcasts itself, it never returns a signed transaction
     can: { signTransaction: false, signAuthorization: false },
-    build: async () => new Eip1193SignerEvm({ provider: globalThis.ethereum, chainId: CHAIN_ID })
+    build: async (net) => new Eip1193SignerEvm({ provider: globalThis.ethereum, chainId: net?.chainId ?? CHAIN_ID })
   }
 ]
 
@@ -72,10 +75,14 @@ export async function loadRemoteSigners () {
   const res = await fetch('/api/signers')
   if (!res.ok) throw new Error(`signer service: HTTP ${res.status}`)
   const list = await res.json()
+  // Dfns wallets and Fireblocks vault assets are bound to one network in the service's .env,
+  // Turnkey and Openfort keys sign for any EVM chain
+  const NETWORKS_OF = { turnkey: ['sepolia', 'arbitrum'], openfort: ['sepolia', 'arbitrum'], dfns: ['sepolia'], fireblocks: ['sepolia'] }
   return list.map(s => ({
     ...s,
     where: 'service',
     key: 'remote',
+    networks: NETWORKS_OF[s.id] ?? ['sepolia'],
     can: FULL,
     build: async () => new RemoteSignerEvm({ id: s.id, path: s.path, isDerivable: s.isDerivable })
   }))

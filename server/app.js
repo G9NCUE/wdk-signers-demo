@@ -11,7 +11,7 @@ export function createApp (registry, { log = console.error } = {}) {
   app.get('/api/history/:address', async (c) => {
     const address = c.req.param('address')
     try {
-      return c.json(await history(address, { limit: Number(c.req.query('limit') || 20) }))
+      return c.json(await history(address, { limit: Number(c.req.query('limit') || 20), network: c.req.query('network') || undefined }))
     } catch (e) {
       log(`[history] ${address}: ${e.message}`)
       return c.json({ error: e.message, address }, 400)

@@ -1,29 +1,35 @@
 import WalletManagerEvm from '@tetherto/wdk-wallet-evm'
-import { JsonRpcProvider, Transaction, formatEther, parseEther, verifyMessage } from 'ethers'
+import { WalletAccountEvm7702Gasless } from '@tetherto/wdk-wallet-evm-7702-gasless'
+import { JsonRpcProvider, Transaction, formatEther, formatUnits, parseEther, parseUnits, verifyMessage } from 'ethers'
+import { DEFAULT_NETWORK, networkOf } from './networks.js'
 
-export { parseEther }
+export { parseEther, parseUnits, formatUnits }
 
-export const CHAIN_ID = 11155111
-// Vite exposes VITE_ variables on import.meta.env; under Node (tests, service) it is undefined
-export const RPC_URL = import.meta.env?.VITE_SEPOLIA_RPC_URL || globalThis.process?.env?.SEPOLIA_RPC_URL || 'https://ethereum-sepolia-rpc.publicnode.com'
-export const EXPLORER = 'https://sepolia.etherscan.io'
+// Sepolia keeps its env override (VITE_ under Vite, plain under Node), the other networks use the
+// public RPC of networks.js
+const SEPOLIA_OVERRIDE = import.meta.env?.VITE_SEPOLIA_RPC_URL || globalThis.process?.env?.SEPOLIA_RPC_URL
+export const rpcOf = (net) => (net.id === 'sepolia' && SEPOLIA_OVERRIDE) || net.rpc
+export const CHAIN_ID = networkOf(DEFAULT_NETWORK).chainId
+export const RPC_URL = rpcOf(networkOf(DEFAULT_NETWORK))
+export const EXPLORER = networkOf(DEFAULT_NETWORK).explorer
 const ACCOUNT_COUNT = 3
 
 // a manager needs a derivable default signer, so a single-key signer is registered by name
 // behind a throwaway seed, which is the WDK's own pattern for private-key signers
 const PLACEHOLDER_SEED = 'test test test test test test test test test test test junk'
 
-export function createWallet (signer) {
-  const config = { provider: RPC_URL, chainId: CHAIN_ID }
-  if (signer.isDerivable) return { wallet: new WalletManagerEvm(signer, config), named: null, signer }
+export function createWallet (signer, networkId = DEFAULT_NETWORK) {
+  const net = networkOf(networkId)
+  const config = { provider: rpcOf(net), chainId: net.chainId }
+  if (signer.isDerivable) return { wallet: new WalletManagerEvm(signer, config), named: null, signer, net }
   const wallet = new WalletManagerEvm(PLACEHOLDER_SEED, config)
   wallet.addSigner('remote', signer)
-  return { wallet, named: 'remote', signer }
+  return { wallet, named: 'remote', signer, net }
 }
 
 // history comes from the service: Blockscout for ETH, the WDK indexer for USDT
-export async function loadHistory (address, limit = 20) {
-  const res = await fetch(`/api/history/${address}?limit=${limit}`)
+export async function loadHistory (address, limit = 20, networkId = DEFAULT_NETWORK) {
+  const res = await fetch(`/api/history/${address}?limit=${limit}&network=${networkId}`)
   if (!res.ok) throw new Error(`history: HTTP ${res.status}`)
   return res.json()
 }
@@ -57,6 +63,27 @@ export async function balanceOf (account) {
   return formatEther(await account.getBalance())
 }
 
+// the network's tokens, as { symbol, address, decimals, balance } with the balance formatted
+export async function tokenBalancesOf (account, net) {
+  return Promise.all(net.tokens.map(async (t) => {
+    try { return { ...t, balance: formatUnits(await account.getTokenBalance(t.address), t.decimals) } } catch (e) { return { ...t, balance: `error: ${e.message}` } }
+  }))
+}
+
+// the 7702 gasless account on top of a WDK account: gas paid in the network's token through the
+// bundler and paymaster of networks.js. Needs signAuthorization on the signer, so not MetaMask.
+export function gaslessOf (account, net) {
+  if (!net.gasless) throw new Error(`${net.label} has no gasless configuration in this demo.`)
+  return new WalletAccountEvm7702Gasless(account, {
+    provider: rpcOf(net),
+    chainId: net.chainId,
+    bundlerUrl: net.gasless.bundlerUrl,
+    delegationAddress: net.gasless.delegationAddress,
+    entryPointVersion: net.gasless.entryPointVersion,
+    paymasterToken: { address: net.gasless.paymasterToken.address }
+  })
+}
+
 // the three checks of the demo, each returns a one-line result for the log and the details behind it
 export const ACTIONS = {
   async signMessage (account) {
@@ -74,12 +101,13 @@ export const ACTIONS = {
 
   // account.signTransaction hands the request to the signer as is, only sendTransaction populates
   // it, so the demo fills nonce, fees and chain like an offline signing flow would
-  async signTransaction (account) {
+  async signTransaction (account, signer, { net } = {}) {
+    const network = net ?? networkOf(DEFAULT_NETWORK)
     const address = await account.getAddress()
-    const provider = new JsonRpcProvider(RPC_URL, CHAIN_ID, { staticNetwork: true })
+    const provider = new JsonRpcProvider(rpcOf(network), network.chainId, { staticNetwork: true })
     const [nonce, fees] = await Promise.all([provider.getTransactionCount(address), provider.getFeeData()])
     const unsigned = {
-      type: 2, chainId: CHAIN_ID, nonce, to: address, value: 0n, data: '0x', gasLimit: 21000n,
+      type: 2, chainId: network.chainId, nonce, to: address, value: 0n, data: '0x', gasLimit: 21000n,
       maxFeePerGas: fees.maxFeePerGas, maxPriorityFeePerGas: fees.maxPriorityFeePerGas
     }
     const signed = await account.signTransaction(unsigned)
@@ -92,21 +120,47 @@ export const ACTIONS = {
     }
   },
 
-  // a real transfer to another account the demo controls; an injected wallet signs and broadcasts
-  // itself, so the send goes through the signer, not the WDK
-  async send (account, signer, { to, value, toLabel }) {
+  // a real transfer to another account the demo controls. Three routes: the native coin through the
+  // WDK (or the wallet's own path for an injected wallet), a token through WalletAccountEvm.transfer,
+  // or a token through the 7702 gasless account with gas paid in the token itself.
+  async send (account, signer, { to, value, toLabel, asset, gasless, net }) {
+    const network = net ?? networkOf(DEFAULT_NETWORK)
     const address = await account.getAddress()
     if (!(value > 0n)) throw new Error('The amount must be above zero.')
     if (to.toLowerCase() === address.toLowerCase()) throw new Error('Pick another account than the sender.')
+    const explorer = network.explorer
+
+    if (asset && asset.address) {
+      const options = { token: asset.address, recipient: to, amount: value }
+      const human = `${formatUnits(value, asset.decimals)} ${asset.symbol}`
+      if (gasless) {
+        const gl = gaslessOf(account, network)
+        const { hash, fee } = await gl.transfer(options)
+        return {
+          ok: true,
+          text: `sent ${human} to ${toLabel} gasless, user operation ${hash}`,
+          link: `${explorer}/address/${address}`,
+          details: { from: address, ...options, toLabel, userOperationHash: hash, feeInToken: fee, via: '7702 gasless, gas paid in the token through the paymaster', bundler: network.gasless.bundlerUrl, explorer: `${explorer}/address/${address}` }
+        }
+      }
+      const { hash, fee } = await account.transfer(options)
+      return {
+        ok: true,
+        text: `sent ${human} to ${toLabel}, ${hash}`,
+        link: `${explorer}/tx/${hash}`,
+        details: { from: address, ...options, toLabel, hash, fee, via: 'WalletAccountEvm.transfer, gas in the native coin', explorer: `${explorer}/tx/${hash}` }
+      }
+    }
+
     const request = { to, value, data: '0x' }
     const { hash, fee } = typeof signer?.sendTransaction === 'function'
       ? await signer.sendTransaction(request)
       : await account.sendTransaction(request)
     return {
       ok: true,
-      text: `sent ${formatEther(value)} ETH to ${toLabel}, ${hash}`,
-      link: `${EXPLORER}/tx/${hash}`,
-      details: { from: address, ...request, toLabel, hash, fee, via: signer?.sendTransaction ? 'the wallet (eth_sendTransaction)' : 'WDK sendTransaction, eth_sendRawTransaction', explorer: `${EXPLORER}/tx/${hash}` }
+      text: `sent ${formatEther(value)} ${network.native} to ${toLabel}, ${hash}`,
+      link: `${explorer}/tx/${hash}`,
+      details: { from: address, ...request, toLabel, hash, fee, via: signer?.sendTransaction ? 'the wallet (eth_sendTransaction)' : 'WDK sendTransaction, eth_sendRawTransaction', explorer: `${explorer}/tx/${hash}` }
     }
   }
 }

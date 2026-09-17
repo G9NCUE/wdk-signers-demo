@@ -1,16 +1,16 @@
-// Transaction history for one Sepolia address, from two sources merged by time:
-// - native ETH transactions from Blockscout's public API (no key);
+// Transaction history for one address on one network, from two sources merged by time:
+// - native coin transactions from Blockscout's public API (no key);
 // - USDT transfers from the WDK indexer (https://wdk-api.tether.io, key in .env), the WDK's own
-//   history feature, which covers token transfers only: no native ETH history there.
+//   history feature, which covers token transfers only: no native coin history there.
 import { formatEther, getAddress } from 'ethers'
+import { DEFAULT_NETWORK, networkOf } from '../src/lib/networks.js'
 
-const BLOCKSCOUT = process.env.BLOCKSCOUT_URL || 'https://eth-sepolia.blockscout.com'
 const INDEXER = process.env.WDK_INDEXER_URL || 'https://wdk-api.tether.io'
-const EXPLORER = 'https://sepolia.etherscan.io'
 
-export async function history (address, { limit = 20 } = {}) {
+export async function history (address, { limit = 20, network = DEFAULT_NETWORK } = {}) {
   const me = getAddress(address)
-  const [eth, usdt] = await Promise.all([nativeFrom(me, limit), tokenFrom(me, limit)])
+  const net = networkOf(network)
+  const [eth, usdt] = await Promise.all([nativeFrom(me, limit, net), tokenFrom(me, limit, net)])
   // newest first; pending transactions have no timestamp yet and go on top. ISO strings compare as
   // plain strings, not localeCompare, whose collation puts the sentinel before digits
   const key = (e) => e.timestamp ?? '9999'
@@ -20,9 +20,10 @@ export async function history (address, { limit = 20 } = {}) {
   return { address: me, entries, sources: { blockscout: eth.status, wdkIndexer: usdt.status } }
 }
 
-async function nativeFrom (me, limit) {
+async function nativeFrom (me, limit, net) {
+  const blockscout = process.env.BLOCKSCOUT_URL || net.blockscout
   try {
-    const res = await fetch(`${BLOCKSCOUT}/api/v2/addresses/${me}/transactions`)
+    const res = await fetch(`${blockscout}/api/v2/addresses/${me}/transactions`)
     if (res.status === 404) return { status: 'ok', entries: [] } // unknown address, never seen on chain
     if (!res.ok) return { status: `HTTP ${res.status}`, entries: [] }
     const { items = [] } = await res.json()
@@ -34,7 +35,7 @@ async function nativeFrom (me, limit) {
         return {
           id: `eth:${tx.hash}`,
           hash: tx.hash,
-          kind: 'ETH',
+          kind: net.native,
           direction: direction(me, from, to),
           amount: formatEther(tx.value),
           counterparty: from === me ? to : from,
@@ -45,7 +46,7 @@ async function nativeFrom (me, limit) {
           fee: tx.fee?.value ? formatEther(tx.fee.value) : null,
           method: tx.method,
           source: 'blockscout',
-          link: `${EXPLORER}/tx/${tx.hash}`
+          link: `${net.explorer}/tx/${tx.hash}`
         }
       })
     }
@@ -54,11 +55,11 @@ async function nativeFrom (me, limit) {
   }
 }
 
-async function tokenFrom (me, limit) {
+async function tokenFrom (me, limit, net) {
   const apiKey = process.env.WDK_INDEXER_API_KEY
   if (!apiKey) return { status: 'no key, set WDK_INDEXER_API_KEY', entries: [] }
   try {
-    const res = await fetch(`${INDEXER}/api/v1/sepolia/usdt/${me}/token-transfers?limit=${limit}`, { headers: { 'x-api-key': apiKey } })
+    const res = await fetch(`${INDEXER}/api/v1/${net.indexer}/usdt/${me}/token-transfers?limit=${limit}`, { headers: { 'x-api-key': apiKey } })
     if (!res.ok) return { status: `HTTP ${res.status}`, entries: [] }
     const { transfers = [] } = await res.json()
     return {
@@ -69,7 +70,7 @@ async function tokenFrom (me, limit) {
         return {
           id: `usdt:${t.transactionHash}:${t.transferIndex ?? t.logIndex ?? 0}`,
           hash: t.transactionHash,
-          kind: 'USDT',
+          kind: net.tokens[0]?.symbol ?? 'USDT',
           direction: direction(me, from, to),
           amount: String(t.amount),
           counterparty: from === me ? to : from,
@@ -77,7 +78,7 @@ async function tokenFrom (me, limit) {
           block: t.blockNumber,
           status: 'ok',
           source: 'wdk-indexer',
-          link: `${EXPLORER}/tx/${t.transactionHash}`
+          link: `${net.explorer}/tx/${t.transactionHash}`
         }
       })
     }

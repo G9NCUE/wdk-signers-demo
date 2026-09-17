@@ -93,6 +93,34 @@ test(`${SIGNER}: the send sheet lists the other demo accounts, then is cancelled
   assert.equal(await page.$$eval('.log li', l => l.length), logBefore, 'nothing was sent')
 })
 
+test('switching to Arbitrum on the seed signer shows USDT0 balances and offers a gasless USDT0 send', async (t) => {
+  if (guard(t)) return
+  // the seed signer is on every network; the default browser signer may not be
+  await page.click('.chip'); await page.waitForSelector('.sheet')
+  await page.click('.sheet .signer:has-text("Seed phrase")')
+  await page.waitForSelector('.state-dot.ready', { timeout: 60000 })
+  await page.click('.tile .status-pill')
+  await page.waitForSelector('.sheet')
+  const networks = await page.$$eval('.sheet .signer .label', els => els.map(e => e.textContent))
+  assert.deepEqual(networks, ['Sepolia', 'Arbitrum One'])
+  const arbitrum = await page.$('.sheet .signer:has-text("Arbitrum")')
+  if (await arbitrum.isDisabled()) { await page.keyboard.press('Escape'); return t.skip(`${SIGNER} is not configured for Arbitrum`) }
+  await arbitrum.click()
+  await page.waitForSelector('.state-dot.ready', { timeout: 60000 })
+  await page.waitForFunction(() => document.querySelector('.tokens')?.textContent.includes('USDT0'), null, { timeout: 30000 })
+  assert.equal(await page.$eval('.tile .status-pill', e => e.textContent), 'Arbitrum One')
+  await page.click('.action:has-text("Send")')
+  await page.waitForSelector('.targets')
+  await page.waitForFunction(() => !/Resolving/.test(document.querySelector('.sheet')?.innerText || ''), null, { timeout: 60000 })
+  assert.deepEqual(await page.$$eval('.assets .pill', p => p.map(x => x.textContent)), ['ETH', 'USDT0'])
+  assert.match(await page.$eval('.btn.primary', b => b.textContent), /^Send 1 USDT0 to .*, gasless$/)
+  await page.click('.btn:has-text("Cancel")')
+  await page.click('.tile .status-pill')
+  await page.click('.sheet .signer:has-text("Sepolia")')
+  await page.waitForSelector('.state-dot.ready', { timeout: 60000 })
+  assert.equal(await page.$eval('.tile .status-pill', e => e.textContent), 'Sepolia')
+})
+
 test('no page errors during the run', (t) => {
   if (guard(t)) return
   assert.deepEqual(errors, [])
