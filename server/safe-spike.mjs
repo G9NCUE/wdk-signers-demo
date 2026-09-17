@@ -63,7 +63,6 @@ const safeAddress = predicted[0]
 const deployed = await safeAs.seed.isDeployed()
 step(`Safe 2-of-3 ${safeAddress}, salt ${SALT}, deployed: ${deployed}`)
 
-const provider = seedHandle.wallet._provider ?? null
 const usdt = new Contract(USDT0.address, ['function balanceOf(address) view returns (uint256)'], (await import('ethers')).getDefaultProvider(rpcOf(net)))
 const balance = async (a) => formatUnits(await usdt.balanceOf(a), USDT0.decimals)
 step(`Safe holds ${await balance(safeAddress)} USDT0; seed #0 ${await balance(addresses.seed)}, seed #1 ${await balance(addresses.seed1 ?? await seed1.getAddress())}`)
