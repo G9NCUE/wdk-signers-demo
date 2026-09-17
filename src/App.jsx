@@ -253,7 +253,7 @@ export default function App () {
       </header>
 
       <div className={`stage ${devOpen ? '' : 'solo'} ${view === 'multisig' ? 'wide' : ''}`}>
-        {view === 'multisig' && <Multisig signers={signers} net={net} append={append} serviceError={serviceError} />}
+        {view === 'multisig' && <Multisig signers={signers} net={net} append={append} serviceError={serviceError} devOpen={devOpen} />}
         {view === 'wallet' && <div className='phone' aria-label='Phone mock'>
           <span className='side mute' aria-hidden='true' />
           <span className='side vol-up' aria-hidden='true' />
@@ -501,6 +501,7 @@ export default function App () {
 
         {devOpen && (
           <aside className='dev'>
+            <div id='dev-top' />
             <Log log={log} expanded={expanded} toggle={toggle} setExpanded={setExpanded} clear={() => { setLog([]); setExpanded(new Set()) }} />
           </aside>
         )}

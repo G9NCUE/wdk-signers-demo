@@ -4,6 +4,7 @@
 // of the one seed, or one seed account and two other signers. Each owner signs through its own
 // ISigner; the Safe module only ever sees a WalletAccountEvm.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { isAddress, parseEther, parseUnits } from 'ethers'
 import RemoteCoordinator from '../lib/safe/remote-coordinator.js'
 import SafeOwnerAccount from '../lib/safe/owner-account.js'
@@ -40,7 +41,7 @@ function sortOwners (list, order) {
   return [...list].sort((a, b) => rank(a) - rank(b))
 }
 
-export default function Multisig ({ signers, net, append, serviceError }) {
+export default function Multisig ({ signers, net, append, serviceError, devOpen }) {
   const [configId, setConfigId] = useState(() => { try { return CONFIGS.some(c => c.id === localStorage.getItem(CONFIG_KEY)) ? localStorage.getItem(CONFIG_KEY) : DEFAULT_CONFIG } catch { return DEFAULT_CONFIG } })
   const config = CONFIGS.find(c => c.id === configId)
   const coordinator = useMemo(() => new RemoteCoordinator({ network: net.id, config: configId }), [net.id, configId])
@@ -65,6 +66,8 @@ export default function Multisig ({ signers, net, append, serviceError }) {
   const [fund, setFund] = useState(null)
   const [copied, setCopied] = useState(null)
   const handles = useRef(new Map()) // signerId -> { entry, handle, accounts }
+  const [slot, setSlot] = useState(null)
+  useEffect(() => { setSlot(document.getElementById('dev-top')) }, [devOpen]) // oxlint-disable-line react/set-state-in-effect -- a DOM lookup, once the column exists
 
   const byId = useCallback((id) => signers.find(s => s.id === id), [signers])
   const custodyOf = (id) => byId(id)?.key ?? 'remote'
@@ -390,6 +393,34 @@ export default function Multisig ({ signers, net, append, serviceError }) {
   }
   const custodyPill = (o, key) => <span key={key} className={`custody ${custodyOf(o.signerId)}`} title={o.owner ?? o.address}>{nameOf(o)}</span>
 
+  const onChain = safe && (
+        <section className='proposals onchain'>
+          <div className='history-head'>
+            <h4 className='eyebrow'>On chain · {token.symbol} and {net.native} movements of the Safe</h4>
+            <a className='link small' href={`${net.explorer}/address/${safe.address}#tokentxns`} target='_blank' rel='noreferrer'>explorer</a>
+          </div>
+          {!chain && <p className='muted'>Loading…</p>}
+          {chain?.error && <p className='warn'>{chain.error}</p>}
+          {chain && !chain.error && chain.entries.length === 0 && <p className='muted'>Nothing yet: the address exists only on paper until the first execution.</p>}
+          {chain && chain.entries.length > 0 && (
+            <ul className='chain'>
+              {chain.entries.map(e => (
+                <li key={e.id} className={`${e.direction} ${e.status}`}>
+                  <a href={e.link} target='_blank' rel='noreferrer'>
+                    <span className={`sign ${e.direction}`}>{e.direction === 'in' ? '↓' : e.direction === 'out' ? '↑' : '↻'}</span>
+                    <span className='main'>
+                      <span className='what'>{e.direction === 'in' ? 'Received' : e.direction === 'out' ? 'Sent' : 'Self'} {e.kind}{e.status === 'failed' ? ' · failed' : e.status === 'pending' ? ' · pending' : ''}{e.counterparty?.toLowerCase() === net.safe.paymasterAddress.toLowerCase() ? ' · paymaster fee' : ''}</span>
+                      <span className='sub'>{e.counterparty ? shortAddress(e.counterparty) : e.method || 'contract'} · {e.timestamp ? when(e.timestamp) : 'in the mempool'}</span>
+                    </span>
+                    <span className={`amt ${e.direction}`}>{e.direction === 'in' ? '+' : e.direction === 'out' ? '−' : ''}{shortBalance(e.amount)} {e.kind}</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )
+
   const header = (
     <div className='ms-head'>
       <label className='select-wrap'>
@@ -651,34 +682,7 @@ export default function Multisig ({ signers, net, append, serviceError }) {
         </section>
       )}
 
-      {/* 5. on chain: the Safe's transfers as the explorer sees them */}
-      {safe && (
-        <section className='proposals onchain'>
-          <div className='history-head'>
-            <h4 className='eyebrow'>On chain · {token.symbol} and {net.native} movements of the Safe</h4>
-            <a className='link small' href={`${net.explorer}/address/${safe.address}#tokentxns`} target='_blank' rel='noreferrer'>explorer</a>
-          </div>
-          {!chain && <p className='muted'>Loading…</p>}
-          {chain?.error && <p className='warn'>{chain.error}</p>}
-          {chain && !chain.error && chain.entries.length === 0 && <p className='muted'>Nothing yet: the address exists only on paper until the first execution.</p>}
-          {chain && chain.entries.length > 0 && (
-            <ul className='chain'>
-              {chain.entries.map(e => (
-                <li key={e.id} className={`${e.direction} ${e.status}`}>
-                  <a href={e.link} target='_blank' rel='noreferrer'>
-                    <span className={`sign ${e.direction}`}>{e.direction === 'in' ? '↓' : e.direction === 'out' ? '↑' : '↻'}</span>
-                    <span className='main'>
-                      <span className='what'>{e.direction === 'in' ? 'Received' : e.direction === 'out' ? 'Sent' : 'Self'} {e.kind}{e.status === 'failed' ? ' · failed' : e.status === 'pending' ? ' · pending' : ''}{e.counterparty?.toLowerCase() === net.safe.paymasterAddress.toLowerCase() ? ' · paymaster fee' : ''}</span>
-                      <span className='sub'>{e.counterparty ? shortAddress(e.counterparty) : e.method || 'contract'} · {e.timestamp ? when(e.timestamp) : 'in the mempool'}</span>
-                    </span>
-                    <span className={`amt ${e.direction}`}>{e.direction === 'in' ? '+' : e.direction === 'out' ? '−' : ''}{shortBalance(e.amount)} {e.kind}</span>
-                  </a>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      )}
+      {onChain && (slot ? createPortal(onChain, slot) : onChain)}
 
       {/* sheets */}
       {setup && (

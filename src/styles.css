@@ -201,7 +201,12 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 .signer .reason { grid-column: 1 / -1; font-size: 11px; line-height: 14px; color: var(--error); }
 
 /* ---- Developer panel, the atlas' chart card ---------------------------------------------------- */
-.dev { min-width: 0; }
+.dev { min-width: 0; display: flex; flex-direction: column; gap: 18px; }
+/* the Multisig page has a configuration row above its banner; the column starts level with the banner */
+.stage.wide .dev { padding-top: 80px; }
+@media (max-width: 1200px) { .stage.wide .dev { padding-top: 0; } }
+#dev-top:empty { display: none; }
+#dev-top .onchain { padding: 14px 16px 12px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--card); }
 .log { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px 12px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--card); }
 .log-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .log-head .toggle { display: inline-flex; align-items: center; gap: 8px; padding: 0; border: 0; background: none; }
