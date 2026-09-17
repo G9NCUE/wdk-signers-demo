@@ -1,6 +1,7 @@
-// The Multisig page: a Safe whose owners are accounts of the signers of the catalogue, shown side
-// by side, and the path of a transaction through them: proposed by one, approved by another,
-// executed by any. Two configurations, each its own Safe, picked from a dropdown: three accounts
+// The Multisig page, laid out the way Safe{Wallet} tells a multisig transaction: the transaction is
+// the unit (a queue and a history, one contextual action per row), an open row shows what it does on
+// the left and who signed on the right, and you act as one signer at a time. Here that signer is a
+// card you click, and each owner is an account of a signer of the catalogue. Two configurations, each its own Safe, picked from a dropdown: three accounts
 // of the one seed, or one seed account and two other signers. Each owner signs through its own
 // ISigner; the Safe module only ever sees a WalletAccountEvm.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -35,6 +36,13 @@ const RECEIPT_TRIES = 30 // 3 s apart
 const short = (hex, n = 10) => (hex ? `${hex.slice(0, n)}…${hex.slice(-6)}` : '')
 const keyOfOwner = (o) => `${o.signerId}:${o.index ?? 0}`
 const sameOwner = (a, b) => a && b && a.signerId === b.signerId && (a.index ?? 0) === (b.index ?? 0)
+// what waits for signatures or execution, oldest nonce first; and what is over, newest first
+const nonceOf = (p) => { try { return BigInt(p.userOperation?.nonce ?? 0) } catch { return 0n } }
+const queueOf = (list) => list.filter(p => p.status === 'pending' || p.status === 'ready').sort((a, b) => (nonceOf(a) < nonceOf(b) ? -1 : nonceOf(a) > nonceOf(b) ? 1 : (a.createdAt < b.createdAt ? -1 : 1)))
+const historyOf = (list) => list.filter(p => p.status === 'executed' || p.status === 'expired')
+// Safe{Wallet}'s words for a transaction's state, plus ours for a lapsed sponsorship
+const STATUS = { pending: 'Needs confirmation', ready: 'Awaiting execution', executed: 'Executed', expired: 'Expired' }
+
 // owners in the configuration's order (seed first), not in the module's address order
 function sortOwners (list, order) {
   const keys = order.split(',')
@@ -56,8 +64,9 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
   const balances = safe && balanceOf.address === safe.address ? balanceOf.value : null
   const [chainOf, setChainOf] = useState({ address: null, value: null }) // the Safe's transfers, from the explorer
   const chain = safe && chainOf.address === safe.address ? chainOf.value : null
-  const [selectedId, setSelectedId] = useState(null)
-  const [opened, setOpened] = useState(null) // an executed proposal whose detail the user asked for
+  const [openId, setOpenId] = useState(null) // the transaction row that is expanded
+  const [tab, setTab] = useState('queue') // queue | history
+  const [actingKey, setActingKey] = useState(null) // "signer:index", the owner the page acts as
   const [now, setNow] = useState(() => Date.now())
   const [ownersOn, setOwnersOn] = useState({ net: null, map: {} }) // "signer:index" -> { phase, address, error }
   const owners = useMemo(() => (ownersOn.net === net.id ? ownersOn.map : {}), [ownersOn, net.id])
@@ -103,13 +112,14 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
       const list = s ? await coordinator.listProposals() : []
       if (gen !== generation.current) return null
       setLoaded({ scope, safe: s, proposals: list, error: null })
-      setSelectedId(id => (id && list.some(p => p.proposalId === id)) ? id : (list[0]?.proposalId ?? null))
+      // the next transaction of the queue opens by itself; history stays folded
+      setOpenId(id => (id && list.some(p => p.proposalId === id)) ? id : (queueOf(list)[0]?.proposalId ?? null))
       return s
     } catch (e) {
       if (gen === generation.current) setLoaded({ scope, safe: null, proposals: [], error: e.message })
       return null
     }
-  }, [coordinator, scope, setLoaded, setSelectedId])
+  }, [coordinator, scope, setLoaded, setOpenId])
 
   // balances from the chain, and the Safe's transfers as the explorer sees them (what happened on
   // chain, including what this page did not do, like the first run from Node)
@@ -228,7 +238,9 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
           text: `proposed ${human} to ${t.toLabel ?? shortAddress(t.to)}, ${r.confirmations} of ${r.threshold} signatures`,
           details: { proposalId: r.proposalId, safeOperationHash: r.proposalId, signedAs: SIGNS[owner.signerId], signature: proposerSignatureOf(record.userOperation.signature), userOperation: record.userOperation, paymaster: net.safe.paymasterAddress, bundler: net.safe.bundlerUrl }
         })
-        setSelectedId(r.proposalId)
+        setOpenId(r.proposalId)
+        setTab('queue')
+        setActingKey(keyOfOwner(owner))
         await refreshProposals()
       } finally {
         coordinator.describeNext(null)
@@ -307,6 +319,8 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
         details: { proposalId, userOperationHash: hash, sentBy: owner.address, bundler: net.safe.bundlerUrl, moduleFee: `${fee} (the module's max gas cost, not ${net.safe.paymasterToken.symbol} units)`, explorer: `${net.blockscout}/op/${hash}` }
       })
       await refreshProposals()
+      setTab('history')
+      setOpenId(proposalId)
       followReceipt(proposalId, execution, nameOf(owner))
     })
   }, [act, ownerOf, safeAs, coordinator, append, net, refreshProposals, followReceipt]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -405,42 +419,68 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
   const openTransfer = useCallback((as, again = null) => {
     const asset = net.safe.paymasterToken
     const inOrder = sortOwners(safe.owners, configOrder)
-    const proposer = as ?? inOrder.find(o => owners[keyOfOwner(o)]?.phase === 'ready') ?? inOrder[0]
+    const proposer = as ?? inOrder.find(o => keyOfOwner(o) === actingKey) ?? inOrder[0]
     const first = inOrder[0]
     const to = again?.recipient ?? first.address
     const known = safe.owners.find(o => o.address.toLowerCase() === to.toLowerCase())
     setTransfer({ asset, amount: again?.amount ?? '0.1', to, toLabel: known ? nameOf(known) : (again?.toLabel ?? null), custom: known ? '' : to, as: proposer })
-  }, [net, safe, owners, configOrder]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [net, safe, actingKey, configOrder]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const copy = useCallback(async (text, tag) => {
     try { await navigator.clipboard.writeText(text); setCopied(tag); setTimeout(() => setCopied(null), 1200) } catch {}
   }, [setCopied])
 
-  // --- derived: the selected proposal and each owner's part in it --------------------------------------
-  const selected = proposals.find(p => p.proposalId === selectedId) ?? null
+  // --- derived: the queue, the history, the signer acted as ---------------------------------------------
   const token = net.safe?.paymasterToken
   const held = balances?.tokens?.find(t => t.symbol === token?.symbol)?.balance
-  // the owners only carry a role while a proposal is in flight; executed or expired, they are idle again
-  const active = selected && !selected.execution && selected.status !== 'expired' ? selected : null
-  const deadline = active?.expiresAt ? Date.parse(active.expiresAt) : null
-  const secondsLeft = deadline ? Math.max(0, Math.round((deadline - now) / 1000)) : null
-  // a clock while the sponsorship runs out; past the deadline the service says 'expired'
-  const activeDeadline = active?.expiresAt ?? null
+  const queue = queueOf(proposals)
+  const history = historyOf(proposals)
+  const next = queue[0] ?? null
+  const acting = ownerCards.find(o => keyOfOwner(o) === actingKey) ?? ownerCards[0] ?? null
+  // a clock while a sponsorship of the queue runs out; past the deadline the service says 'expired'
+  const nextDeadline = queue.map(p => p.expiresAt).filter(Boolean).sort()[0] ?? null
   useEffect(() => {
-    if (!activeDeadline) return
+    if (!nextDeadline) return
     const id = setInterval(() => {
       setNow(Date.now())
-      if (Date.parse(activeDeadline) <= Date.now()) { clearInterval(id); refreshProposals() }
+      if (Date.parse(nextDeadline) <= Date.now()) { clearInterval(id); refreshProposals() }
     }, 1000)
     return () => clearInterval(id)
-  }, [activeDeadline, refreshProposals])
-  const roleOf = (o) => {
-    if (!active) return null
-    return {
-      proposer: sameOwner(active.proposedBy, o),
-      confirmed: active.confirmations.some(c => sameOwner(c, o))
-    }
+  }, [nextDeadline, refreshProposals])
+  // an executed transaction opened without its receipt (the page was closed meanwhile): fetch it now
+  const lacksReceipt = proposals.find(p => p.proposalId === openId && p.execution && !p.execution.txHash && !receiptsPending.has(p.proposalId)) ?? null
+  const lacksReceiptId = lacksReceipt?.proposalId ?? null
+  useEffect(() => {
+    if (!lacksReceipt) return
+    const { at, ...execution } = lacksReceipt.execution // eslint-disable-line no-unused-vars
+    // oxlint-disable-next-line react/set-state-in-effect -- starts a poll; its state lands later, not in this pass
+    followReceipt(lacksReceipt.proposalId, execution, 'Safe')
+  }, [lacksReceiptId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const secondsLeftOf = (p) => (p.expiresAt ? Math.max(0, Math.round((Date.parse(p.expiresAt) - now) / 1000)) : null)
+  const signedBy = (p, o) => p.confirmations.find(c => sameOwner(c, o))
+  // a newer proposal on the same Safe nonce: what an expired one was replaced by
+  const replacementOf = (p) => proposals.find(q => q.proposalId !== p.proposalId && nonceOf(q) === nonceOf(p) && q.createdAt > p.createdAt) ?? null
+
+  // acting as an owner is this page's "connect wallet": it builds the signer if it is not there yet
+  const actAs = (o) => {
+    setActingKey(keyOfOwner(o))
+    if (safe) ownerOf(o).catch(e => append({ ok: false, signer: nameOf(o), text: e.message, details: errorDetails(e) }))
   }
+
+  // the one action a row offers, for the signer acted as
+  const actionOf = (p) => {
+    if (!acting) return null
+    const working = busy && busy.proposalId === p.proposalId
+    if (p.status === 'expired') return { label: `Re-propose${p.meta ? ` ${p.meta.amount} ${p.meta.asset}` : ''}`, run: () => openTransfer(acting, p.meta), primary: true }
+    if (p.status === 'ready') return { label: working ? 'Executing…' : `Execute as ${nameOf(acting)}`, run: () => execute(p.proposalId, acting), primary: true, disabled: busy !== null }
+    if (p.status === 'pending') {
+      if (signedBy(p, acting)) return { label: 'Signed', disabled: true, title: `${nameOf(acting)} already signed, act as another owner to confirm` }
+      return { label: working ? 'Confirming…' : `Confirm as ${nameOf(acting)}`, run: () => approve(p.proposalId, acting), primary: true, disabled: busy !== null }
+    }
+    return null
+  }
+
   const custodyPill = (o, key) => <span key={key} className={`custody ${custodyOf(o.signerId)}`} title={o.owner ?? o.address}>{nameOf(o)}</span>
 
   const onChain = safe && (
@@ -460,63 +500,145 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
     </section>
   )
 
-  // one proposal in full: every signature, the execution, the receipt, the raw user operation
-  const detailOf = (p) => (
-    <div className='detail'>
-      <div className='history-head'>
-        <h4 className='eyebrow'>Trail of {short(p.proposalId, 12)}</h4>
-        {p.execution && <button className='link small' onClick={() => setOpened(null)}>hide</button>}
-      </div>
-      <div className='detail-summary'>
-        <span className='what'>{p.meta ? `${p.meta.amount} ${p.meta.asset}` : 'custom operation'}</span>
-        {p.meta?.recipient && <span className='muted'>to {p.meta.toLabel ? `${p.meta.toLabel} ` : ''}<code title={p.meta.recipient}>{shortAddress(p.meta.recipient)}</code></span>}
-        <span className='muted'>from the Safe <code>{shortAddress(safe.address)}</code></span>
-      </div>
-      <ol className='timeline'>
-        {p.confirmations.map((c, i) => (
-          <li key={c.owner} className='tl-item done'>
+  // an open row, as in Safe{Wallet}: what the transaction does on the left, who signed on the right
+  const expandedOf = (p) => {
+    const n = p.confirmations.length
+    const left = secondsLeftOf(p)
+    const replaced = p.status === 'expired' ? replacementOf(p) : null
+    const action = actionOf(p)
+    return (
+      <div className='tx-open'>
+        <div className='tx-what'>
+          <div className='tx-send'>
+            <span className='eyebrow'>Send</span>
+            <span className='amount'>{p.meta ? `${p.meta.amount} ${p.meta.asset}` : 'custom operation'}</span>
+          </div>
+          <dl className='tx-facts'>
+            <dt>To</dt>
+            <dd>{p.meta?.toLabel && <span>{p.meta.toLabel}</span>} {p.meta?.recipient && <><code title={p.meta.recipient}>{shortAddress(p.meta.recipient)}</code> <a className='mini' href={`${net.explorer}/address/${p.meta.recipient}`} target='_blank' rel='noreferrer'>explorer</a></>}</dd>
+            <dt>From</dt>
+            <dd>the Safe <code title={safe.address}>{shortAddress(safe.address)}</code></dd>
+            <dt>Nonce</dt>
+            <dd><code>{String(nonceOf(p))}</code></dd>
+            <dt>SafeOp hash</dt>
+            <dd><code title={p.proposalId}>{short(p.proposalId, 14)}</code> <button className='mini' onClick={() => copy(p.proposalId, p.proposalId)}>{copied === p.proposalId ? 'copied' : 'copy'}</button></dd>
+            <dt>Gas</dt>
+            <dd>paid in {token.symbol} through the paymaster <code title={net.safe.paymasterAddress}>{shortAddress(net.safe.paymasterAddress)}</code></dd>
+            {p.expiresAt && !p.execution && (
+              <>
+                <dt>Sponsorship</dt>
+                <dd className={p.status === 'expired' ? 'bad' : left !== null && left < 60 ? 'warnish' : ''}>{p.status === 'expired' ? `expired at ${when(p.expiresAt)}` : `valid for ${left} s, until ${when(p.expiresAt)}`}</dd>
+              </>
+            )}
+            <dt>Created</dt>
+            <dd>{when(p.createdAt)}</dd>
+          </dl>
+          {p.execution && (
+            <div className='step-links'>
+              <a className='mini' href={`${net.blockscout}/op/${p.execution.hash}`} target='_blank' rel='noreferrer'>user op {short(p.execution.hash, 8)}</a>
+              {p.execution.txHash && <a className='mini' href={`${net.explorer}/tx/${p.execution.txHash}`} target='_blank' rel='noreferrer'>tx {short(p.execution.txHash, 8)}</a>}
+            </div>
+          )}
+          <details className='tl-raw wide'>
+            <summary>Advanced details: the user operation as signed and stored</summary>
+            <pre className='details'>{formatDetails({ safeAddress: p.safeAddress, entryPoint: p.entryPoint, moduleAddress: p.moduleAddress, options: p.options, userOperation: p.userOperation })}</pre>
+          </details>
+        </div>
+
+        <ol className='timeline tx-steps'>
+          <li className='tl-item done'>
             <span className='tl-dot' />
             <div className='tl-body'>
-              <div className='tl-title'>{i === 0 ? 'Proposed' : 'Approved'} by {custodyPill(c, c.owner)}<span className='muted small'>{when(c.at)}</span></div>
-              <div className='tl-meta'>{SIGNS[c.signerId] ?? 'signed the SafeOp'} · signature {i + 1} of {safe.threshold}</div>
-              <details className='tl-raw'><summary>signature</summary><code>{c.signature}</code></details>
+              <div className='tl-title'>Created</div>
+              <div className='tl-meta'>by {custodyPill(p.proposedBy, 'by')} <span className='muted small'>{when(p.createdAt)}</span></div>
             </div>
           </li>
-        ))}
-        {p.confirmations.length < safe.threshold && !p.execution && (
-          <li className='tl-item'>
+          <li className={`tl-item ${n >= safe.threshold ? 'done' : ''}`}>
             <span className='tl-dot' />
-            <div className='tl-body'><div className='tl-title muted'>Waiting for {safe.threshold - p.confirmations.length} more signature{safe.threshold - p.confirmations.length > 1 ? 's' : ''}</div></div>
+            <div className='tl-body'>
+              <div className='tl-title'>Confirmations <span className='muted'>({n} of {safe.threshold})</span></div>
+              <ul className='signers-list'>
+                {ownerCards.map(o => {
+                  const c = signedBy(p, o)
+                  const isActing = sameOwner(o, acting)
+                  return (
+                    <li key={keyOfOwner(o)} className={c ? 'signed' : ''}>
+                      <span className='tick' aria-hidden='true'>{c ? '✓' : ''}</span>
+                      <div className='signer-line'>
+                        <div className='signer-name'>{custodyPill(o, 'o')}{isActing && <span className='you'>acting</span>}{c && <span className='muted small'>{when(c.at)}</span>}</div>
+                        {c && (
+                          <details className='tl-raw'>
+                            <summary>{SIGNS[o.signerId] ?? 'signed the SafeOp'}</summary>
+                            <code>{c.signature}</code>
+                          </details>
+                        )}
+                        {!c && p.status === 'pending' && (isActing
+                          ? <span className='muted small'>has not signed, the button of the row is theirs</span>
+                          : <button className='link small' onClick={() => actAs(o)}>act as {nameOf(o)} to confirm</button>)}
+                        {!c && p.status !== 'pending' && <span className='muted small'>did not sign</span>}
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
           </li>
-        )}
-        {p.execution
-          ? (
-            <li className='tl-item done'>
-              <span className='tl-dot' />
-              <div className='tl-body'>
-                <div className='tl-title'>Executed by {custodyPill(p.execution.by, 'exec')}<span className='muted small'>{when(p.execution.at)}</span></div>
-                <div className='tl-meta'>user operation sent to the bundler{p.execution.txHash ? `, ${p.execution.success === false ? 'reverted' : 'mined'} in block ${p.execution.blockNumber ? Number(p.execution.blockNumber) : '…'}` : ', receipt pending'}</div>
-                <div className='step-links'>
-                  <a className='mini' href={`${net.blockscout}/op/${p.execution.hash}`} target='_blank' rel='noreferrer'>user op {short(p.execution.hash, 8)}</a>
-                  {p.execution.txHash && <a className='mini' href={`${net.explorer}/tx/${p.execution.txHash}`} target='_blank' rel='noreferrer'>tx {short(p.execution.txHash, 8)}</a>}
+          {p.status === 'expired'
+            ? (
+              <li className='tl-item expired'>
+                <span className='tl-dot' />
+                <div className='tl-body'>
+                  <div className='tl-title'>Expired <span className='muted small'>{when(p.expiresAt)}</span></div>
+                  <div className='tl-meta'>Candide's paymaster signs a sponsorship valid for three minutes and the owners' signatures cover it. Past the deadline the bundler answers "already expired": the operation has to be proposed and signed again.</div>
+                  {replaced && <div className='tl-meta'>Replaced on nonce {String(nonceOf(p))} by <button className='link small' onClick={() => { setOpenId(replaced.proposalId); setTab(replaced.status === 'executed' || replaced.status === 'expired' ? 'history' : 'queue') }}>{short(replaced.proposalId, 10)}</button> ({STATUS[replaced.status].toLowerCase()}).</div>}
                 </div>
-                <div className='tl-meta'>fee taken in {token.symbol} by the paymaster {shortAddress(net.safe.paymasterAddress)}, visible on the tx; the module's own figure ({p.execution.moduleMaxGasCost}) is a max gas cost, not {token.symbol}</div>
-              </div>
-            </li>
-            )
-          : p.confirmations.length >= safe.threshold && (
-            <li className='tl-item'>
-              <span className='tl-dot' />
-              <div className='tl-body'><div className='tl-title muted'>Ready: any owner can execute</div></div>
+              </li>
+              )
+            : (
+              <li className={`tl-item ${p.execution ? 'done' : ''}`}>
+                <span className='tl-dot' />
+                <div className='tl-body'>
+                  <div className='tl-title'>{p.execution ? 'Executed' : n >= safe.threshold ? 'Can be executed' : 'Execution'}</div>
+                  {p.execution
+                    ? <div className='tl-meta'>by {custodyPill(p.execution.by, 'exec')} <span className='muted small'>{when(p.execution.at)}</span> · {p.execution.txHash ? `${p.execution.success === false ? 'reverted' : 'mined'} in block ${p.execution.blockNumber ? Number(p.execution.blockNumber) : '…'}` : receiptsPending.has(p.proposalId) ? 'sent to the bundler, waiting for the receipt…' : 'sent to the bundler'}</div>
+                    : <div className='tl-meta'>{n >= safe.threshold ? 'any owner can send it, the fee comes out of the Safe' : `after ${safe.threshold - n} more confirmation${safe.threshold - n > 1 ? 's' : ''}`}</div>}
+                </div>
+              </li>
+              )}
+          {action && !p.execution && (
+            <li className='tx-action'>
+              <button className={`btn ${action.primary ? 'primary' : ''}`} disabled={action.disabled} title={action.title} onClick={action.run}>{action.label}</button>
             </li>
           )}
-      </ol>
-      <details className='tl-raw wide'>
-        <summary>User operation, as signed and stored by the coordinator</summary>
-        <pre className='details'>{formatDetails({ safeAddress: p.safeAddress, entryPoint: p.entryPoint, moduleAddress: p.moduleAddress, options: p.options, userOperation: p.userOperation })}</pre>
-      </details>
-    </div>
-  )
+        </ol>
+      </div>
+    )
+  }
+
+  // one row of the queue or the history
+  const rowOf = (p, { isNext = false } = {}) => {
+    const action = actionOf(p)
+    const open = p.proposalId === openId
+    const left = secondsLeftOf(p)
+    return (
+      <li key={p.proposalId} className={`tx ${open ? 'open' : ''} ${p.status}`}>
+        <div className='tx-row' role='button' tabIndex={0} aria-expanded={open} onClick={() => setOpenId(open ? null : p.proposalId)} onKeyDown={ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); setOpenId(open ? null : p.proposalId) } }}>
+          <span className='tx-nonce'>{String(nonceOf(p))}{isNext && <span className='next'>next</span>}</span>
+          <span className='tx-main'>
+            <span className='what'><span className='send-glyph' aria-hidden='true'>↗</span> Send {p.meta ? `${p.meta.amount} ${p.meta.asset}` : 'custom operation'}{p.meta ? <span className='muted'> to {p.meta.toLabel ?? shortAddress(p.meta.recipient)}</span> : null}</span>
+            <span className='sub'>{when(p.createdAt)} · created by {nameOf(p.proposedBy)}{left !== null && !p.execution && p.status !== 'expired' ? ` · sponsorship ${left} s` : ''}</span>
+          </span>
+          <span className='tx-confs' title={p.confirmations.map(c => nameOf(c)).join(', ')}>{p.confirmations.length} out of {safe.threshold}</span>
+          <span className={`tx-status ${p.status}`}>{STATUS[p.status]}</span>
+          <span className='tx-cta' onClick={ev => ev.stopPropagation()}>
+            {action && !p.execution && <button className={`btn ${action.primary ? 'primary' : ''}`} disabled={action.disabled} title={action.title} onClick={action.run}>{action.label}</button>}
+          </span>
+          <span className='tx-chev' aria-hidden='true'>{open ? '▾' : '▸'}</span>
+        </div>
+        {open && expandedOf(p)}
+      </li>
+    )
+  }
 
   const header = (
     <div className='ms-head'>
@@ -588,18 +710,16 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
         )}
       </section>
 
-      {/* 2. the owners */}
-      <section className='owners' aria-label='Owners'>
+      {/* 2. the signers: click one to act as it, this page's "connect wallet" */}
+      <section className='owners' aria-label='Signers'>
         {ownerCards.map(o => {
           const key = keyOfOwner(o)
           const state = owners[key]
-          const role = roleOf(o)
           const entry = byId(o.signerId)
           const onNet = entry?.available && entry.networks?.includes(net.id)
-          const mine = active?.confirmations.find(c => sameOwner(c, o))
-          const canApprove = safe && active && !role?.confirmed && active.confirmations.length < safe.threshold
-          const canExecute = safe && active && active.confirmations.length >= safe.threshold
+          const isActing = safe && sameOwner(o, acting)
           const isBusy = busy && sameOwner(busy.owner, o)
+          const signedNext = next && signedBy(next, o)
           const status = !safe
             ? 'preview'
             : isBusy
@@ -610,17 +730,9 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
                   ? 'error'
                   : !onNet
                     ? `not on ${net.label}`
-                    : role?.proposer
-                        ? 'proposed'
-                        : role?.confirmed
-                          ? 'approved'
-                          : canApprove
-                            ? 'waiting for signature'
-                            : canExecute
-                              ? 'can execute'
-                              : entry?.prompts && state?.phase !== 'ready' ? 'connect to sign' : 'idle'
+                    : state?.phase === 'ready' ? 'connected' : entry?.prompts ? 'click to connect' : 'not connected yet'
           return (
-            <article key={key} className={`tile owner ${role?.confirmed ? 'signed' : ''} ${isBusy ? 'busy' : ''}`}>
+            <article key={key} className={`tile owner ${isActing ? 'acting' : ''} ${isBusy ? 'busy' : ''} ${safe && onNet ? 'clickable' : ''}`} role={safe ? 'button' : undefined} tabIndex={safe && onNet ? 0 : undefined} aria-pressed={safe ? Boolean(isActing) : undefined} onClick={() => safe && onNet && actAs(o)} onKeyDown={ev => { if (safe && onNet && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); actAs(o) } }}>
               <div className='owner-head'>
                 <span className='label'>{nameOf(o)}</span>
                 <span className={`custody ${custodyOf(o.signerId)}`}>{custodyOf(o.signerId)}</span>
@@ -628,24 +740,15 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
               <div className='owner-kind'>{entry?.kind ?? o.signerId}</div>
               <div className='addr'>
                 {o.address
-                  ? <><code title={o.address}>{shortAddress(o.address)}</code><a className='mini' href={`${net.explorer}/address/${o.address}`} target='_blank' rel='noreferrer'>explorer</a></>
+                  ? <><code title={o.address}>{shortAddress(o.address)}</code><a className='mini' href={`${net.explorer}/address/${o.address}`} target='_blank' rel='noreferrer' onClick={ev => ev.stopPropagation()}>explorer</a></>
                   : <span className='muted'>account {o.index ?? 0} of {entry?.label ?? o.signerId}</span>}
               </div>
-              <div className='state'><span className={`state-dot ${state?.phase === 'ready' || role?.confirmed ? 'ready' : state?.phase === 'connecting' || isBusy ? 'connecting' : state?.phase === 'error' ? 'error' : ''}`} />{status}</div>
+              <div className='state'><span className={`state-dot ${state?.phase === 'ready' ? 'ready' : state?.phase === 'connecting' || isBusy ? 'connecting' : state?.phase === 'error' ? 'error' : ''}`} />{status}</div>
               {state?.error && <p className='warn'>{state.error}</p>}
-              {mine && (
-                <details className='signed-block'>
-                  <summary>Signed the SafeOp · {when(mine.at)}</summary>
-                  <div className='signed-what'>{SIGNS[o.signerId]}</div>
-                  <div className='mono'>hash {short(active.proposalId, 12)}</div>
-                  <div className='mono'>sig {short(mine.signature, 12)}</div>
-                </details>
-              )}
               {safe && (
-                <div className='owner-actions'>
-                  {!active && <button className='btn' disabled={busy !== null || !onNet} onClick={() => openTransfer(o)}>Propose as {nameOf(o)}</button>}
-                  {canApprove && <button className='btn primary' disabled={busy !== null || !onNet} onClick={() => approve(active.proposalId, o)}>Approve as {nameOf(o)}</button>}
-                  {canExecute && <button className='btn primary' disabled={busy !== null || !onNet} onClick={() => execute(active.proposalId, o)}>Execute as {nameOf(o)}</button>}
+                <div className='owner-foot'>
+                  <span className={`acting-tag ${isActing ? 'on' : ''}`}>{isActing ? 'Acting as this signer' : onNet ? 'Act as this signer' : ''}</span>
+                  {next && <span className={`signed-tag ${signedNext ? 'on' : ''}`}>{signedNext ? `✓ signed #${String(nonceOf(next))}` : `has not signed #${String(nonceOf(next))}`}</span>}
                 </div>
               )}
             </article>
@@ -653,78 +756,26 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
         })}
       </section>
 
-      {/* 3. the flow */}
+      {/* 3. transactions: a queue and a history, one action per row, an open row tells the whole story */}
       {safe && (
-        <section className='flow' aria-label='Transaction flow'>
-          {(() => {
-            const p = selected
-            const n = p?.confirmations.length ?? 0
-            const steps = [
-              { title: 'Proposed', done: Boolean(p), who: p?.proposedBy, sub: p ? `${p.meta?.amount ?? ''} ${p.meta?.asset ?? ''} to ${p.meta?.toLabel ?? shortAddress(p.meta?.recipient ?? '')}` : 'any owner proposes and signs first' },
-              { title: `Approved (${n} of ${safe.threshold})`, done: n >= safe.threshold, who: null, sub: p ? (n >= safe.threshold ? 'threshold met' : `needs ${safe.threshold - n} more owner${safe.threshold - n > 1 ? 's' : ''}`) : 'other owners add their signature' },
-              {
-                title: 'Executed',
-                done: Boolean(p?.execution),
-                who: p?.execution?.by,
-                sub: p?.execution
-                  ? (p.execution.txHash ? 'mined' : receiptsPending.has(p.proposalId) ? 'sent to the bundler, waiting for the receipt…' : 'sent to the bundler')
-                  : p?.status === 'expired'
-                    ? `sponsorship expired at ${when(p.expiresAt)}, re-propose`
-                    : (n >= safe.threshold ? 'any owner can execute' : 'after the threshold') + (secondsLeft !== null ? `, paymaster sponsorship valid for ${secondsLeft} s` : '')
-              }
-            ]
-            return steps.map((s, i) => (
-              <div key={s.title} className='flow-item'>
-                {i > 0 && <span className={`arrow ${steps[i - 1].done ? 'done' : ''}`} aria-hidden='true' />}
-                <div className={`step ${s.done ? 'done' : ''} ${i === 2 && p?.status === 'expired' ? 'expired' : ''}`}>
-                  <span className='num'>{i + 1}</span>
-                  <div className='step-body'>
-                    <div className='step-title'>{s.title}</div>
-                    {i === 1 && p && <div className='step-who'>{p.confirmations.map(c => custodyPill(c, c.owner))}</div>}
-                    {i !== 1 && s.who && <div className='step-who'>{custodyPill(s.who, 'who')}{s.who.at && <span className='muted small'>{when(s.who.at)}</span>}</div>}
-                    {i === 2 && p?.execution && <div className='step-who'><span className='muted small'>{when(p.execution.at)}</span></div>}
-                    <div className='step-sub'>{s.sub}</div>
-                    {i === 2 && p?.status === 'expired' && (
-                      <div className='step-links'>
-                        <button className='btn primary' disabled={busy !== null} onClick={() => openTransfer(p.proposedBy, p.meta)}>Re-propose {p.meta ? `${p.meta.amount} ${p.meta.asset}` : ''}</button>
-                      </div>
-                    )}
-                    {i === 2 && p?.execution && (
-                      <div className='step-links'>
-                        <a className='mini' href={`${net.blockscout}/op/${p.execution.hash}`} target='_blank' rel='noreferrer'>user op</a>
-                        {p.execution.txHash && <a className='mini' href={`${net.explorer}/tx/${p.execution.txHash}`} target='_blank' rel='noreferrer'>tx</a>}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))
-          })()}
-        </section>
-      )}
-
-      {/* 4. proposals, each one opening on its full trail: while in flight, or on a click once executed */}
-      {safe && (
-        <section className='proposals'>
-          <div className='history-head'>
-            <h4 className='eyebrow'>Proposals · {proposals.length}</h4>
-            <button className='link small' onClick={() => { refreshProposals(); refreshBalances(safe.address) }}>refresh</button>
+        <section className='txs' aria-label='Transactions'>
+          <div className='txs-head'>
+            <div className='tabs' role='tablist'>
+              <button role='tab' aria-selected={tab === 'queue'} className={tab === 'queue' ? 'on' : ''} onClick={() => setTab('queue')}>Queue <span className='count'>{queue.length}</span></button>
+              <button role='tab' aria-selected={tab === 'history'} className={tab === 'history' ? 'on' : ''} onClick={() => setTab('history')}>History <span className='count'>{history.length}</span></button>
+            </div>
+            <span className='txs-tools'>
+              {acting && <span className='muted small'>acting as {custodyPill(acting, 'acting')}</span>}
+              <button className='link small' onClick={() => { refreshProposals(); refreshBalances(safe.address) }}>refresh</button>
+            </span>
           </div>
-          {proposals.length === 0 && <p className='muted'>No proposal yet. Fund the Safe, then propose a transfer as one of the owners.</p>}
-          <ul>
-            {proposals.map(p => (
-              <li key={p.proposalId}>
-                <button className={`proposal ${p.proposalId === selectedId ? 'active' : ''}`} title={p.execution ? 'show or hide the detail' : 'select'} onClick={() => { setSelectedId(p.proposalId); setOpened(o => (o === p.proposalId ? null : p.proposalId)) }}>
-                  <span className='main'>
-                    <span className='what'>{p.meta ? `${p.meta.amount} ${p.meta.asset} to ${p.meta.toLabel ?? shortAddress(p.meta.recipient)}` : 'custom operation'}</span>
-                    <span className='sub'>{short(p.proposalId, 12)} · by {nameOf(p.proposedBy)} · {when(p.createdAt)}</span>
-                  </span>
-                  <span className='confs'>{p.confirmations.map(c => custodyPill(c, c.owner))}<span className='muted small'>{p.confirmations.length}/{safe.threshold}</span></span>
-                  <span className={`status-pill ${p.status === 'executed' ? 'ok' : p.status === 'ready' ? 'warn' : p.status === 'expired' ? 'bad' : 'plain'}`}>{p.status}</span>
-                </button>
-                {p.proposalId === selectedId && (!p.execution || opened === p.proposalId) && detailOf(p)}
-              </li>
-            ))}
+          {tab === 'queue' && queue.length === 0 && <p className='muted'>Nothing waiting. {Number(held) > 0 ? 'Start a new transfer as one of the signers.' : 'Fund the Safe, then start a new transfer as one of the signers.'}{history.length > 0 && <> <button className='link' onClick={() => setTab('history')}>See the history</button>.</>}</p>}
+          {tab === 'history' && history.length === 0 && <p className='muted'>No executed or expired transaction yet.</p>}
+          <ul className='tx-list'>
+            {/* oxlint-disable-next-line react/refs -- a row only hands callbacks to its buttons, no ref is read while rendering */}
+            {tab === 'queue' && queue.map((p, i) => rowOf(p, { isNext: i === 0 }))}
+            {/* oxlint-disable-next-line react/refs -- same */}
+            {tab === 'history' && history.map(p => rowOf(p))}
           </ul>
         </section>
       )}
@@ -810,7 +861,7 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
             <div className='setup-row'>
               <span className='eyebrow'>Initiator, signs first</span>
               <div className='assets'>
-                {safe.owners.map(o => <button key={keyOfOwner(o)} className={`pill ${sameOwner(transfer.as, o) ? 'active' : ''}`} onClick={() => setTransfer(t => ({ ...t, as: o }))}>{nameOf(o)}</button>)}
+                {safe.owners.map(o => <button key={keyOfOwner(o)} className={`pill ${sameOwner(transfer.as, o) ? 'active' : ''}`} onClick={() => { setTransfer(t => ({ ...t, as: o })); setActingKey(keyOfOwner(o)) }}>{nameOf(o)}</button>)}
               </div>
             </div>
             {transfer.error && <p className='warn'>{transfer.error}</p>}
