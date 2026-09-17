@@ -15,9 +15,9 @@ demo controls. A developer panel keeps every call with the bytes behind it.
 | Seed phrase | `VITE_DEMO_SEED_PHRASE` in `.env`, else a throwaway per browser origin | browser | `@tetherto/wdk-wallet-evm/signers` | yes |
 | Ledger | the device, WebHID | browser | [wdk-signer-ledger-evm](https://github.com/G9NCUE/wdk-signer-ledger-evm) | offline tests, device pending |
 | MetaMask | the extension, EIP-1193 | browser | [wdk-signer-eip1193-evm](https://github.com/G9NCUE/wdk-signer-eip1193-evm) | connected, see limits |
-| Turnkey | Turnkey HD wallet, policies | service | [wdk-signer-turnkey-evm](https://github.com/G9NCUE/wdk-signer-turnkey-evm) | yes |
-| Dfns | Dfns MPC, one wallet per network on a derived key | service | [wdk-signer-dfns-evm](https://github.com/G9NCUE/wdk-signer-dfns-evm) | yes, both networks |
-| Openfort | Openfort TEE backend wallet | service | [wdk-signer-openfort-evm](https://github.com/G9NCUE/wdk-signer-openfort-evm) | yes |
+| Turnkey | Turnkey HD wallet, policies | service | [wdk-signer-turnkey-evm](https://github.com/G9NCUE/wdk-signer-turnkey-evm) | yes on Sepolia (2026-09-10); free-plan signing quota exhausted since |
+| Dfns | Dfns MPC, one wallet per network on a derived key | service | [wdk-signer-dfns-evm](https://github.com/G9NCUE/wdk-signer-dfns-evm) | yes, both networks, gasless USDT0 on Arbitrum |
+| Openfort | Openfort TEE backend wallet | service | [wdk-signer-openfort-evm](https://github.com/G9NCUE/wdk-signer-openfort-evm) | yes, both networks, gasless USDT0 on Arbitrum |
 | Fireblocks | Fireblocks MPC vault account | service | [wdk-signer-fireblocks-evm](https://github.com/G9NCUE/wdk-signer-fireblocks-evm) | yes, sandbox, Sepolia only |
 
 ## Networks
@@ -140,6 +140,10 @@ Ledger and MetaMask need a device or an extension in a headed browser and stay m
   with the `m/` prefix, which the packages here follow.
 - The Ledger Ethereum kit 1.18 signs EIP-7702 authorizations (`signDelegationAuthorization`), which
   PR #89 of `wdk-wallet-evm` declared impossible in July.
+- `wdk-wallet-evm-7702-gasless` signs the user operation as EIP-712 data whose message holds BigInt
+  values; a signer that forwards typed data to an API must make it JSON-safe first (Dfns' SDK throws on
+  a BigInt). The Dfns and Ledger packages now pass it through `TypedDataEncoder.getPayload`. Filed as
+  [issue #42](https://github.com/tetherto/wdk-wallet-evm-7702-gasless/issues/42) with the question of who should normalise.
 - `wdk-wallet-evm-erc-4337` reads the seed's private key, so only the seed signer can use it;
   `wdk-wallet-evm-7702-gasless` wraps any account and needs `signAuthorization` only, so every signer
   here but MetaMask can go gasless. It pins `wdk-wallet-evm` beta.17 and checks `instanceof`, hence
