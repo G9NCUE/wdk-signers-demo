@@ -64,17 +64,21 @@ again; the page shows the countdown, marks such proposals expired and offers to 
 multisig that gathers signatures over days needs the Safe to pay its own gas (`useNativeCoins`) or a
 paymaster that does not sign with a deadline.
 
-The page shows the Safe (address, deployed or not, USDT0 and ETH balances), the three owners side by
-side with their custody badge, and the path of the selected proposal: **proposed** by one owner,
-**approved** until the threshold, **executed** by any. The action sits on the owner's card, "Propose
-as Dfns #0", "Approve as Openfort", so each signature is visibly one signer's. Each card that signed
-opens on what its provider received (EIP-712 typed data for Dfns, a 32-byte digest for Openfort, the
-local key for the seed), the SafeOp hash and the signature. The Safe pays its gas in USDT0 through
-Candide's token paymaster (EntryPoint v0.6): no ETH anywhere, and the deployment rides in the first
-executed operation. Arbitrum One only. A transfer is USDT0 only, to one of the owners or to any
-address; the sheet's "initiator" is the owner who signs first, the Safe itself is the sender.
+The page is laid out the way Safe{Wallet} tells a multisig transaction. The Safe sits on top
+(address, deployed or not, USDT0 and ETH balances). The three signers come next, each with its custody
+badge: clicking one makes the page **act as** it, the equivalent of connecting a wallet. Transactions
+are a **Queue** and a **History**; a row carries its nonce, what it sends, "1 out of 2", a status
+(Needs confirmation, Awaiting execution, Executed, Expired) and one button for the signer acted as:
+"Confirm as Dfns #0", "Execute as Openfort", or a disabled "Signed". An open row shows what the
+transaction does on the left (recipient, nonce, SafeOp hash, paymaster, sponsorship countdown, raw user
+operation) and who signed on the right, every owner listed, with what its provider received (EIP-712
+typed data for Dfns, a 32-byte digest for Openfort, the local key for the seed). The Safe's on-chain
+movements sit beside, above the log. The Safe pays its gas in USDT0 through Candide's token paymaster
+(EntryPoint v0.6): no ETH anywhere, and the deployment rides in the first executed operation. Arbitrum
+One only. A transfer is USDT0 only, to one of the owners or to any address; the Safe is the sender, the
+initiator is the owner who signs first.
 
-![The Multisig page: the Multi-signer Safe, its three owners, the flow line, the on-chain movements beside](docs/multisig.png)
+![The Multisig page: the Seed-only Safe, its signers, the history with an open transaction, the on-chain movements beside](docs/multisig.png)
 
 Behind it: `src/lib/safe/owner-account.js` puts any `WalletAccountEvm`, hence any `ISigner`, in the
 module's owner seat (the module's constructor only takes a seed, see Findings);
@@ -171,7 +175,8 @@ npm run test:live     # every provider configured in .env, on every network it s
 npm run test:browser  # the phone in Chrome (Playwright, `chrome` channel) with `npm run dev` up:
                       # picker, accounts, balances, history, sign message, sign tx, the send sheet
                       # cancelled, the switch to Arbitrum and back; DEMO_SIGNER=Openfort picks another signer;
-                      # and the Multisig page: tab, configurations, owner cards, flow, setup sheet cancelled
+                      # and the Multisig page: tab, configurations, acting as a signer, queue and history,
+                      # an open transaction, setup sheet cancelled
 ```
 
 Ledger and MetaMask need a device or an extension in a headed browser and stay manual.
