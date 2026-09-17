@@ -360,10 +360,10 @@ export default function Multisig ({ signers, net, append, serviceError }) {
 
   // recipients: the Safe's own owners (the money goes back to one of the signers), or any address
   const openTransfer = useCallback((as) => {
-    const asset = net.tokens[0] ?? null
+    const asset = net.safe.paymasterToken
     const proposer = as ?? safe.owners.find(o => owners[keyOfOwner(o)]?.phase === 'ready') ?? safe.owners[0]
     const first = sortOwners(safe.owners, configOrder)[0]
-    setTransfer({ asset, amount: asset ? '0.1' : '0.0005', to: first.address, toLabel: nameOf(first), custom: '', as: proposer })
+    setTransfer({ asset, amount: '0.1', to: first.address, toLabel: nameOf(first), custom: '', as: proposer })
   }, [net, safe, owners, configOrder]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const copy = useCallback(async (text, tag) => {
@@ -443,7 +443,7 @@ export default function Multisig ({ signers, net, append, serviceError }) {
             </div>
             <div className='banner-side'>
               <div className='tile-value' title={held ?? ''}>{balances ? (shortBalance(held) ?? '—') : <span className='skeleton' />}{balances && <span className='unit'>{token.symbol}</span>}</div>
-              <div className='tokens'><span className='token'><b>{shortBalance(balances?.native) ?? '…'}</b> {net.native}</span>{balances?.error && <span className='token'>{balances.error}</span>}</div>
+              <div className='tokens'><span className='token'><b>{shortBalance(balances?.native) ?? '…'}</b> {net.native}, none needed</span>{balances?.error && <span className='token'>{balances.error}</span>}</div>
               <div className='banner-actions'>
                 <button className='btn' onClick={() => setFund({ amount: '0.5' })} disabled={busy !== null}>Fund from seed #0</button>
                 <button className='btn primary' onClick={() => openTransfer()} disabled={busy !== null}>New transfer</button>
@@ -637,18 +637,13 @@ export default function Multisig ({ signers, net, append, serviceError }) {
           <div className='modal' role='dialog' aria-label='New transfer' onClick={ev => ev.stopPropagation()}>
             <h4 className='eyebrow'>New transfer from the Safe {shortAddress(safe.address)}</h4>
             <p className='muted small'>The funds leave the Safe. An owner only signs: the initiator below gives the first of the {safe.threshold} signatures, the others approve, any owner executes.</p>
-            <div className='assets'>
-              {[...net.tokens, { symbol: net.native, address: null }].map(asset => (
-                <button key={asset.symbol} className={`pill ${(transfer.asset?.address ?? null) === asset.address ? 'active' : ''}`} onClick={() => setTransfer(t => ({ ...t, asset: asset.address ? asset : null, amount: asset.address ? '0.1' : '0.0005' }))}>{asset.symbol}</button>
-              ))}
-            </div>
             <label className='field'>
               <span className='eyebrow'>Amount</span>
               <span className='input'>
                 <input inputMode='decimal' value={transfer.amount} onChange={ev => setTransfer(t => ({ ...t, amount: ev.target.value }))} />
                 <span className='unit'>{transfer.asset ? transfer.asset.symbol : net.native}</span>
               </span>
-              <span className='muted small'>the Safe holds {shortBalance(held) ?? '…'} {token.symbol} and {shortBalance(balances?.native) ?? '…'} {net.native}; the fee is taken in {token.symbol} by the paymaster</span>
+              <span className='muted small'>the Safe holds {shortBalance(held) ?? '…'} {token.symbol}; the fee comes out of it too, taken by the paymaster, no {net.native} involved</span>
             </label>
             <div className='eyebrow'>To, one of the owners</div>
             <ul className='targets'>
