@@ -350,7 +350,8 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 .step-sub { font-size: 12px; line-height: 16px; color: var(--secondary); }
 .step-links { display: flex; gap: 6px; margin-top: 2px; }
 
-.detail { min-height: 0; gap: 10px; }
+.detail { display: flex; flex-direction: column; gap: 10px; margin-top: -1px; padding: 14px 16px 16px; border: 1px solid var(--accent); border-top: 1px solid var(--line-subtle); border-radius: 0 0 var(--radius-control) var(--radius-control); background: var(--surface); }
+.proposals li:has(.detail) .proposal { border-radius: var(--radius-control) var(--radius-control) 0 0; }
 .detail-tools { display: flex; align-items: center; gap: 12px; }
 .detail-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; font-size: 14px; }
 .detail-summary .what { font: 600 18px/1 var(--font-mono); color: var(--ink); }
