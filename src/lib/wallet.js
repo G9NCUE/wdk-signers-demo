@@ -74,7 +74,7 @@ export async function tokenBalancesOf (account, net) {
 // bundler and paymaster of networks.js. Needs signAuthorization on the signer, so not MetaMask.
 export function gaslessOf (account, net) {
   if (!net.gasless) throw new Error(`${net.label} has no gasless configuration in this demo.`)
-  return new WalletAccountEvm7702Gasless(account, {
+  const gl = new WalletAccountEvm7702Gasless(account, {
     provider: rpcOf(net),
     chainId: net.chainId,
     bundlerUrl: net.gasless.bundlerUrl,
@@ -82,6 +82,10 @@ export function gaslessOf (account, net) {
     entryPointVersion: net.gasless.entryPointVersion,
     paymasterToken: { address: net.gasless.paymasterToken.address }
   })
+  // the module recognises an account by `instanceof WalletAccountEvm`; with two copies of the class
+  // in a bundle it rebuilds the owner from our account as if it were a seed and signs with nothing
+  if (gl._ownerAccount !== account) throw new Error('the 7702 module did not keep the account (two copies of WalletAccountEvm in the bundle); signing would go to an empty seed signer')
+  return gl
 }
 
 // the three checks of the demo, each returns a one-line result for the log and the details behind it

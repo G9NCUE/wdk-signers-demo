@@ -57,6 +57,9 @@ export default function App () {
   const net = networkOf(networkId)
   const walletRef = useRef(null)
   const nextId = useRef(0)
+  // bumped on every signer or network switch: a refresh scheduled for an earlier selection must not
+  // write its accounts back under the new signer's name (they are disposed by then)
+  const generation = useRef(0)
 
   useEffect(() => {
     loadRemoteSigners()
@@ -79,14 +82,14 @@ export default function App () {
     setExpanded(s => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
   }, [])
 
-  const refreshBalances = useCallback(async (list, network = net) => {
+  const refreshBalances = useCallback(async (list, network = net, gen = generation.current) => {
     const withBalances = await Promise.all(list.map(async (a) => {
       try {
         const [balance, tokens] = await Promise.all([balanceOf(a.account), tokenBalancesOf(a.account, network)])
         return { ...a, balance, tokens }
       } catch (e) { return { ...a, balance: `error: ${e.message}`, tokens: [] } }
     }))
-    setAccounts(withBalances)
+    if (gen === generation.current) setAccounts(withBalances)
   }, [net])
 
   // switching signer disposes the previous wallet and rebuilds accounts and balances
@@ -94,6 +97,7 @@ export default function App () {
     if (!entry.available) return
     setSheet(false)
     setNetSheet(false)
+    const gen = ++generation.current
     walletRef.current?.wallet.dispose()
     walletRef.current = null
     setSelected(entry)
@@ -105,8 +109,10 @@ export default function App () {
     try {
       const signer = await entry.build(network)
       const handle = createWallet(signer, network.id)
+      if (gen !== generation.current) { handle.wallet.dispose(); return } // superseded by a later switch
       walletRef.current = handle
       const list = await loadAccounts(handle)
+      if (gen !== generation.current) return
       setAccounts(list)
       remember(entry.id, list)
       setPhase('ready')
@@ -116,8 +122,9 @@ export default function App () {
         text: `${list.length} account${list.length > 1 ? 's' : ''} resolved on ${network.label}`,
         details: { signer: entry.id, where: entry.where, network: network.id, chainId: network.chainId, accounts: list.map(a => ({ index: a.index, path: a.path, address: a.address })) }
       })
-      await refreshBalances(list, network)
+      await refreshBalances(list, network, gen)
     } catch (e) {
+      if (gen !== generation.current) return
       setPhase('error')
       setError(e.message)
       append({ ok: false, signer: entry.label, text: e.message, details: errorDetails(e) })
@@ -145,7 +152,7 @@ export default function App () {
     try {
       const result = await ACTIONS[name](entry.account, walletRef.current?.signer, { net, ...args })
       append({ ...result, signer: selected.label, account: entry.index })
-      if (name === 'send') setTimeout(() => { refreshBalances(accounts); setHistoryTick(t => t + 1) }, 15000)
+      if (name === 'send') { const gen = generation.current; setTimeout(() => { refreshBalances(accounts, net, gen); if (gen === generation.current) setHistoryTick(t => t + 1) }, 15000) }
     } catch (e) {
       append({ ok: false, signer: selected.label, account: entry.index, text: e.message, details: errorDetails(e) })
     } finally {
