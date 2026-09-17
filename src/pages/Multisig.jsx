@@ -55,6 +55,7 @@ export default function Multisig ({ signers, net, append, serviceError }) {
   const [chainOf, setChainOf] = useState({ address: null, value: null }) // the Safe's transfers, from the explorer
   const chain = safe && chainOf.address === safe.address ? chainOf.value : null
   const [selectedId, setSelectedId] = useState(null)
+  const [opened, setOpened] = useState(null) // an executed proposal whose detail the user asked for
   const [ownersOn, setOwnersOn] = useState({ net: null, map: {} }) // "signer:index" -> { phase, address, error }
   const owners = useMemo(() => (ownersOn.net === net.id ? ownersOn.map : {}), [ownersOn, net.id])
   const setOwners = useCallback((update) => setOwnersOn(o => ({ net: net.id, map: update(o.net === net.id ? o.map : {}) })), [net.id])
@@ -563,12 +564,16 @@ export default function Multisig ({ signers, net, append, serviceError }) {
         </section>
       )}
 
-      {/* 4. the selected proposal, in full: every signature, the execution, the user operation */}
-      {safe && selected && (
+      {/* 4. the selected proposal, in full: every signature, the execution, the user operation.
+          Shown while the proposal is in flight; once executed, on request from the list */}
+      {safe && selected && (!selected.execution || opened === selected.proposalId) && (
         <section className='tile detail'>
           <div className='history-head'>
             <h4 className='eyebrow'>Proposal · {short(selected.proposalId, 12)}</h4>
-            <span className={`status-pill ${selected.status === 'executed' ? 'ok' : selected.status === 'ready' ? 'warn' : 'plain'}`}>{selected.status}</span>
+            <span className='detail-tools'>
+              <span className={`status-pill ${selected.status === 'executed' ? 'ok' : selected.status === 'ready' ? 'warn' : 'plain'}`}>{selected.status}</span>
+              {selected.execution && <button className='link small' onClick={() => setOpened(null)}>hide</button>}
+            </span>
           </div>
           <div className='detail-summary'>
             <span className='what'>{selected.meta ? `${selected.meta.amount} ${selected.meta.asset}` : 'custom operation'}</span>
@@ -632,7 +637,7 @@ export default function Multisig ({ signers, net, append, serviceError }) {
           <ul>
             {proposals.map(p => (
               <li key={p.proposalId}>
-                <button className={`proposal ${p.proposalId === selectedId ? 'active' : ''}`} onClick={() => setSelectedId(p.proposalId)}>
+                <button className={`proposal ${p.proposalId === selectedId ? 'active' : ''}`} title={p.execution ? 'show or hide the detail' : 'select'} onClick={() => { setSelectedId(p.proposalId); setOpened(o => (o === p.proposalId ? null : p.proposalId)) }}>
                   <span className='main'>
                     <span className='what'>{p.meta ? `${p.meta.amount} ${p.meta.asset} to ${p.meta.toLabel ?? shortAddress(p.meta.recipient)}` : 'custom operation'}</span>
                     <span className='sub'>{short(p.proposalId, 12)} · by {nameOf(p.proposedBy)} · {when(p.createdAt)}</span>
