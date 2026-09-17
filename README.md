@@ -111,9 +111,11 @@ Three layers, nothing is ever broadcast:
 ```
 npm test              # offline: bigint JSON, the HTTP signer protocol through the real WalletManagerEvm
                       # on the WDK's own signers, the history merge on stubbed replies, dispose ownership
-npm run test:live     # every provider configured in .env, service in-process: balance from Sepolia,
-                      # a transaction populated from the chain and signed, message, typed data;
-                      # unconfigured providers skip, a provider quota skips with the reason
+npm run test:live     # every provider configured in .env, on every network it supports, service
+                      # in-process: balances (ETH and USDT0), a transaction populated from the chain and
+                      # signed, message, typed data, and on Arbitrum a gasless quote when the account holds
+                      # USDT0; unconfigured providers skip, a provider quota skips with the reason;
+                      # LIVE_NETWORKS=arbitrum narrows it
 npm run test:browser  # the phone in Chrome (Playwright, `chrome` channel) with `npm run dev` up:
                       # picker, accounts, balances, history, sign message, sign tx, the send sheet
                       # cancelled, the switch to Arbitrum and back; DEMO_SIGNER=Openfort picks another signer

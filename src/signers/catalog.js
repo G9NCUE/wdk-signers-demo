@@ -6,6 +6,7 @@ import { LedgerSignerEvm, createWebHidDmk } from 'wdk-signer-ledger-evm'
 import { Eip1193SignerEvm } from 'wdk-signer-eip1193-evm'
 import RemoteSignerEvm from './remote-signer-evm.js'
 import { CHAIN_ID } from '../lib/wallet.js'
+import { networksOf } from '../lib/support.js'
 
 // what a signer cannot do, the UI greys the action out instead of failing it
 const FULL = { signTransaction: true, signAuthorization: true }
@@ -39,7 +40,7 @@ export const BROWSER_SIGNERS = [
     kind: `seed from ${SEED_SOURCE}, WDK SeedSignerEvm`,
     where: 'browser',
     key: 'local',
-    networks: ['sepolia', 'arbitrum'],
+    networks: networksOf('seed'),
     available: true,
     isDerivable: true,
     can: FULL,
@@ -52,7 +53,7 @@ export const BROWSER_SIGNERS = [
     kind: 'hardware, WebHID, wdk-signer-ledger-evm',
     where: 'browser',
     key: 'hardware',
-    networks: ['sepolia', 'arbitrum'],
+    networks: networksOf('ledger'),
     prompts: true, // opens the device picker, never built silently
     available: typeof navigator !== 'undefined' && 'hid' in navigator,
     reason: 'WebHID is not available in this browser, use Chrome or Edge',
@@ -66,7 +67,7 @@ export const BROWSER_SIGNERS = [
     kind: 'injected wallet, EIP-1193, wdk-signer-eip1193-evm',
     where: 'browser',
     key: 'extension',
-    networks: ['sepolia', 'arbitrum'],
+    networks: networksOf('metamask'),
     prompts: true, // opens the wallet's connect prompt, never built silently
     available: Eip1193SignerEvm.isAvailable(globalThis),
     reason: 'no injected wallet found, install MetaMask, Rabby or Coinbase Wallet',
@@ -81,14 +82,11 @@ export async function loadRemoteSigners () {
   const res = await fetch('/api/signers')
   if (!res.ok) throw new Error(`signer service: HTTP ${res.status}`)
   const list = await res.json()
-  // Dfns wallets and Fireblocks vault assets are bound to one network in the service's .env,
-  // Turnkey and Openfort keys sign for any EVM chain
-  const NETWORKS_OF = { turnkey: ['sepolia', 'arbitrum'], openfort: ['sepolia', 'arbitrum'], dfns: ['sepolia'], fireblocks: ['sepolia'] }
   return list.map(s => ({
     ...s,
     where: 'service',
     key: 'remote',
-    networks: NETWORKS_OF[s.id] ?? ['sepolia'],
+    networks: networksOf(s.id),
     can: FULL,
     build: async () => new RemoteSignerEvm({ id: s.id, path: s.path, isDerivable: s.isDerivable })
   }))
