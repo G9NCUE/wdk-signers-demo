@@ -33,6 +33,12 @@ const RECEIPT_TRIES = 30 // 3 s apart
 const short = (hex, n = 10) => (hex ? `${hex.slice(0, n)}…${hex.slice(-6)}` : '')
 const keyOfOwner = (o) => `${o.signerId}:${o.index ?? 0}`
 const sameOwner = (a, b) => a && b && a.signerId === b.signerId && (a.index ?? 0) === (b.index ?? 0)
+// owners in the configuration's order (seed first), not in the module's address order
+function sortOwners (list, order) {
+  const keys = order.split(',')
+  const rank = (o) => { const i = keys.indexOf(keyOfOwner(o)); return i === -1 ? 99 : i }
+  return [...list].sort((a, b) => rank(a) - rank(b))
+}
 
 export default function Multisig ({ signers, net, append, serviceError }) {
   const [configId, setConfigId] = useState(() => { try { return CONFIGS.some(c => c.id === localStorage.getItem(CONFIG_KEY)) ? localStorage.getItem(CONFIG_KEY) : DEFAULT_CONFIG } catch { return DEFAULT_CONFIG } })
@@ -67,6 +73,10 @@ export default function Multisig ({ signers, net, append, serviceError }) {
     return entry?.isDerivable === false ? label : `${label} #${o.index ?? 0}`
   }
 
+  // the cards read in the configuration's order (seed first), not in the module's address order
+  const configOrder = config.owners.map(keyOfOwner).join(',')
+  const ownerCards = safe ? sortOwners(safe.owners, configOrder) : config.owners.map(o => ({ ...o, address: null }))
+
   const chooseConfig = (id) => {
     setConfigId(id)
     try { localStorage.setItem(CONFIG_KEY, id) } catch {}
@@ -84,18 +94,18 @@ export default function Multisig ({ signers, net, append, serviceError }) {
       setLoaded({ scope, safe: null, proposals: [], error: e.message })
       return null
     }
-  }, [coordinator, scope])
+  }, [coordinator, scope, setLoaded, setSelectedId])
 
   const refreshBalances = useCallback(async (address) => {
     if (!address) return
     try { setBalanceOf({ address, value: await balancesOf(address, net) }) } catch (e) { setBalanceOf({ address, value: { error: e.message } }) }
-  }, [net])
+  }, [net, setBalanceOf])
 
   const refreshProposals = useCallback(async () => {
     const list = await coordinator.listProposals()
     setLoaded(l => ({ ...l, scope, proposals: list }))
     return list
-  }, [coordinator, scope])
+  }, [coordinator, scope, setLoaded])
 
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect -- the state lands after the fetch, not synchronously
@@ -277,6 +287,7 @@ export default function Multisig ({ signers, net, append, serviceError }) {
   // --- set up: pick owners, threshold, optional salt, predicted address ---------------------------------
   // candidates: the seed's first accounts, and account 0 of every other signer on this network
   const openSetup = useCallback(async () => {
+    const config = CONFIGS.find(c => c.id === configId)
     const onNet = signers.filter(s => s.networks?.includes(net.id))
     const candidates = onNet.flatMap(s => s.id === 'seed'
       ? Array.from({ length: SEED_ACCOUNTS }, (_, i) => ({ key: `seed:${i}`, signerId: 'seed', index: i, entry: s }))
@@ -291,7 +302,7 @@ export default function Multisig ({ signers, net, append, serviceError }) {
     const groups = await recipients(onNet.filter(s => s.id !== 'seed'))
     for (const g of groups) if (g.accounts.length) addresses[`${g.id}:0`] = g.accounts[0].address
     setSetup(s => s && { ...s, addresses: { ...addresses, ...s.addresses }, resolving: false })
-  }, [signers, net, config, ownerOf])
+  }, [signers, net, configId, ownerOf, setSetup])
 
   // connecting a prompting owner (Ledger, MetaMask) from the setup sheet
   const connectForSetup = useCallback(async (c) => {
@@ -301,7 +312,7 @@ export default function Multisig ({ signers, net, append, serviceError }) {
     } catch (e) {
       setSetup(s => s && { ...s, error: e.message })
     }
-  }, [ownerOf])
+  }, [ownerOf, setSetup])
 
   // the inputs of the prediction; the predicted address is only shown while it matches them
   const setupInputs = setup && !setup.resolving
@@ -323,6 +334,7 @@ export default function Multisig ({ signers, net, append, serviceError }) {
 
   const createSafe = useCallback(async () => {
     const s = setup
+    const configLabel = CONFIGS.find(c => c.id === configId).label
     try {
       const created = await coordinator.createSafe({
         owners: s.candidates.filter(c => s.picked.has(c.key)).map(c => ({ signerId: c.signerId, index: c.index, address: s.addresses[c.key] })),
@@ -330,33 +342,33 @@ export default function Multisig ({ signers, net, append, serviceError }) {
         saltNonce: s.salt.trim() || undefined
       })
       setSetup(null)
-      append({ ok: true, signer: 'Safe', text: `${config.label}: Safe ${created.threshold} of ${created.owners.length} registered at ${shortAddress(created.address)}, nothing sent, it deploys with its first operation`, details: created })
+      append({ ok: true, signer: 'Safe', text: `${configLabel}: Safe ${created.threshold} of ${created.owners.length} registered at ${shortAddress(created.address)}, nothing sent, it deploys with its first operation`, details: created })
       await refreshSafe()
       await refreshBalances(created.address)
     } catch (e) {
       setSetup(x => x && { ...x, error: e.message })
     }
-  }, [setup, coordinator, append, refreshSafe, refreshBalances, config])
+  }, [setup, coordinator, append, refreshSafe, refreshBalances, configId, setSetup])
 
   const forget = useCallback(async () => {
-    if (!window.confirm(`Forget the "${config.label}" Safe and its proposals in the service? The chain keeps what was deployed.`)) return
+    const configLabel = CONFIGS.find(c => c.id === configId).label
+    if (!window.confirm(`Forget the "${configLabel}" Safe and its proposals in the service? The chain keeps what was deployed.`)) return
     await coordinator.forgetSafe()
-    append({ ok: true, signer: 'Safe', text: `forgot ${shortAddress(safe.address)} (${config.label}) on ${net.label}` })
+    append({ ok: true, signer: 'Safe', text: `forgot ${shortAddress(safe.address)} (${configLabel}) on ${net.label}` })
     await refreshSafe()
-  }, [coordinator, safe, net, append, refreshSafe, config])
+  }, [coordinator, safe, net, append, refreshSafe, configId])
 
-  const openTransfer = useCallback(async (as) => {
+  // recipients: the Safe's own owners (the money goes back to one of the signers), or any address
+  const openTransfer = useCallback((as) => {
     const asset = net.tokens[0] ?? null
     const proposer = as ?? safe.owners.find(o => owners[keyOfOwner(o)]?.phase === 'ready') ?? safe.owners[0]
-    setTransfer({ asset, amount: asset ? '0.1' : '0.0005', to: null, toLabel: null, custom: '', targets: [], loading: true, as: proposer })
-    const targets = await recipients(signers.filter(s => s.networks?.includes(net.id)), { exclude: safe.address })
-    const first = targets.find(g => g.accounts.length)
-    setTransfer(t => t && { ...t, targets, loading: false, to: first?.accounts[0].address ?? null, toLabel: first ? `${first.label}${first.accounts[0].index !== undefined ? ` #${first.accounts[0].index}` : ''}` : null })
-  }, [net, safe, owners, signers])
+    const first = sortOwners(safe.owners, configOrder)[0]
+    setTransfer({ asset, amount: asset ? '0.1' : '0.0005', to: first.address, toLabel: nameOf(first), custom: '', as: proposer })
+  }, [net, safe, owners, configOrder]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const copy = useCallback(async (text, tag) => {
     try { await navigator.clipboard.writeText(text); setCopied(tag); setTimeout(() => setCopied(null), 1200) } catch {}
-  }, [])
+  }, [setCopied])
 
   // --- derived: the selected proposal and each owner's part in it --------------------------------------
   const selected = proposals.find(p => p.proposalId === selectedId) ?? null
@@ -371,9 +383,6 @@ export default function Multisig ({ signers, net, append, serviceError }) {
     }
   }
   const custodyPill = (o, key) => <span key={key} className={`custody ${custodyOf(o.signerId)}`} title={o.owner ?? o.address}>{nameOf(o)}</span>
-  // the cards read in the configuration's order (seed first), not in the module's address order
-  const rank = (o) => { const i = config.owners.findIndex(c => sameOwner(c, o)); return i === -1 ? 99 : i }
-  const ownerCards = safe ? [...safe.owners].sort((a, b) => rank(a) - rank(b)) : config.owners.map(o => ({ ...o, address: null }))
 
   const header = (
     <div className='ms-head'>
@@ -641,25 +650,18 @@ export default function Multisig ({ signers, net, append, serviceError }) {
               </span>
               <span className='muted small'>the Safe holds {shortBalance(held) ?? '…'} {token.symbol} and {shortBalance(balances?.native) ?? '…'} {net.native}; the fee is taken in {token.symbol} by the paymaster</span>
             </label>
-            <div className='eyebrow'>To</div>
-            {transfer.loading && <p className='muted'>Resolving the demo's accounts…</p>}
+            <div className='eyebrow'>To, one of the owners</div>
             <ul className='targets'>
-              {transfer.targets.map(g => (
-                <li key={g.id}>
-                  <div className='target-group'><span className='label'>{g.label}</span><span className={`custody ${g.key}`}>{g.key}</span>{g.error && <span className='reason'>{g.error}</span>}</div>
-                  {g.accounts.map(a => {
-                    const label = a.index !== undefined ? `${g.label} #${a.index}` : g.label
-                    return (
-                      <button key={a.address} className={`target ${transfer.to === a.address ? 'active' : ''}`} onClick={() => setTransfer(t => ({ ...t, to: a.address, toLabel: label, custom: '' }))} title={a.address}>
-                        <span>{a.index !== undefined ? `#${a.index}` : 'account'}</span><code>{shortAddress(a.address)}</code>
-                      </button>
-                    )
-                  })}
-                </li>
-              ))}
+              <li>
+                {ownerCards.map(o => (
+                  <button key={keyOfOwner(o)} className={`target ${transfer.to === o.address ? 'active' : ''}`} onClick={() => setTransfer(t => ({ ...t, to: o.address, toLabel: nameOf(o), custom: '' }))} title={o.address}>
+                    <span>{nameOf(o)} <span className={`custody ${custodyOf(o.signerId)}`}>{custodyOf(o.signerId)}</span></span><code>{shortAddress(o.address)}</code>
+                  </button>
+                ))}
+              </li>
             </ul>
             <label className='field compact'>
-              <span className='eyebrow'>Or any address</span>
+              <span className='eyebrow'>Or any other recipient</span>
               <span className='input'><input placeholder='0x…' value={transfer.custom} onChange={ev => { const v = ev.target.value.trim(); setTransfer(t => ({ ...t, custom: ev.target.value, ...(isAddress(v) ? { to: v, toLabel: null } : {}) })) }} /></span>
             </label>
             <div className='setup-row'>
@@ -671,7 +673,7 @@ export default function Multisig ({ signers, net, append, serviceError }) {
             {held !== undefined && Number(held) === 0 && <p className='warn'>The Safe holds no {token.symbol}: fund it first, the bundler cannot estimate an empty Safe.</p>}
             <div className='sheet-actions'>
               <button className='btn' onClick={() => setTransfer(null)}>Cancel</button>
-              <button className='btn primary' disabled={!transfer.to || transfer.loading} onClick={propose}>Propose {transfer.amount || '0'} {transfer.asset ? transfer.asset.symbol : net.native} as {nameOf(transfer.as)}</button>
+              <button className='btn primary' disabled={!transfer.to} onClick={propose}>Propose {transfer.amount || '0'} {transfer.asset ? transfer.asset.symbol : net.native} as {nameOf(transfer.as)}</button>
             </div>
           </div>
         </div>
