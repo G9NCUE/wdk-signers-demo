@@ -2,7 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { BROWSER_SIGNERS, loadRemoteSigners } from './signers/catalog.js'
 import { ACTIONS, balanceOf, createWallet, formatDetails, loadAccounts, loadHistory, parseEther, parseUnits, shortAddress, shortBalance, tokenBalancesOf } from './lib/wallet.js'
 import { recipients, remember } from './lib/recipients.js'
-import { DEFAULT_NETWORK, NETWORKS, networkOf } from './lib/networks.js'
+import { DEFAULT_NETWORK, DEFAULT_TESTNET, NETWORKS, networkOf, networksFor } from './lib/networks.js'
+
+const TESTNET_KEY = 'wdk-signers-demo.testnet'
+function storedTestnet () { try { return localStorage.getItem(TESTNET_KEY) === '1' } catch { return false } }
 
 const DIRECTION = { in: { sign: '↓', label: 'Received' }, out: { sign: '↑', label: 'Sent' }, self: { sign: '↻', label: 'Self' } }
 
@@ -48,7 +51,8 @@ export default function App () {
   const [history, setHistory] = useState(null)
   const [historyTick, setHistoryTick] = useState(0)
   const [send, setSend] = useState(null) // { targets, loading, to, toLabel, amount, asset, gasless }
-  const [networkId, setNetworkId] = useState(DEFAULT_NETWORK)
+  const [testnet, setTestnet] = useState(storedTestnet)
+  const [networkId, setNetworkId] = useState(() => (storedTestnet() ? DEFAULT_TESTNET : DEFAULT_NETWORK))
   const [netSheet, setNetSheet] = useState(false)
   const net = networkOf(networkId)
   const walletRef = useRef(null)
@@ -58,6 +62,13 @@ export default function App () {
     loadRemoteSigners()
       .then(remote => setSigners([...BROWSER_SIGNERS, ...remote]))
       .catch(e => setServiceError(e.message))
+  }, [])
+
+  // Escape closes whichever sheet is open
+  useEffect(() => {
+    const onKey = (ev) => { if (ev.key === 'Escape') { setSheet(false); setNetSheet(false); setSend(null) } }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
   }, [])
 
   const append = useCallback((entry) => {
@@ -119,6 +130,13 @@ export default function App () {
     setNetSheet(false)
     if (selected) await select(selected, networkOf(id))
   }, [selected, select])
+
+  // the testnet toggle: off is the mainnet default, on is the testnet default; remembered per browser
+  const toggleTestnet = useCallback(async (on) => {
+    setTestnet(on)
+    try { localStorage.setItem(TESTNET_KEY, on ? '1' : '0') } catch {}
+    await switchNetwork(on ? DEFAULT_TESTNET : DEFAULT_NETWORK)
+  }, [switchNetwork])
 
   const run = useCallback(async (name, args) => {
     const entry = accounts[current]
@@ -184,10 +202,15 @@ export default function App () {
             </a>
             <div className='topbar-title'>
               <h1>WDK signers</h1>
-              <p className='subtitle'>One <code>WalletManagerEvm</code>, one <code>ISigner</code> at a time, on Sepolia. Seven signers behind the same contract.</p>
+              <p className='subtitle'>One <code>WalletManagerEvm</code>, one <code>ISigner</code> at a time. Seven signers behind the same contract, on {net.label}.</p>
             </div>
           </div>
           <div className='topbar-right'>
+            <label className='testnet-toggle' title='Testnet mode: Sepolia instead of Arbitrum One'>
+              <input type='checkbox' checked={testnet} disabled={phase === 'connecting'} onChange={ev => toggleTestnet(ev.target.checked)} />
+              <span className='knob' aria-hidden='true' />
+              Testnet
+            </label>
             <div className='view-toggle' role='group' aria-label='Layout'>
               <button aria-pressed={!devOpen} onClick={() => setDevOpen(false)}>Phone</button>
               <button aria-pressed={devOpen} onClick={() => setDevOpen(true)}>Phone + log</button>
@@ -354,7 +377,7 @@ export default function App () {
                   <div className='grip' />
                   <h4 className='eyebrow'>Network</h4>
                   <ul className='signers'>
-                    {Object.values(NETWORKS).map(n => {
+                    {networksFor(testnet).map(n => {
                       const supported = !selected || selected.networks?.includes(n.id)
                       return (
                         <li key={n.id}>

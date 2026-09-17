@@ -40,7 +40,11 @@ export const NETWORKS = {
   }
 }
 
-export const DEFAULT_NETWORK = 'sepolia'
+// mainnet by default; the testnet sits behind the toggle in the top bar
+export const DEFAULT_NETWORK = 'arbitrum'
+export const DEFAULT_TESTNET = 'sepolia'
+
+export const networksFor = (testnet) => Object.values(NETWORKS).filter(n => n.testnet === testnet)
 
 export function networkOf (id) {
   const n = NETWORKS[id]

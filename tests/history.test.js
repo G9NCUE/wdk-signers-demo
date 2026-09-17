@@ -31,7 +31,7 @@ afterEach(() => { globalThis.fetch = realFetch; delete process.env.WDK_INDEXER_A
 
 test('ETH and USDT entries are merged newest first with direction and amounts', async () => {
   process.env.WDK_INDEXER_API_KEY = 'k'
-  const h = await history(ME.toLowerCase())
+  const h = await history(ME.toLowerCase(), { network: 'sepolia' })
   assert.equal(h.address, ME)
   assert.deepEqual(h.sources, { blockscout: 'ok', wdkIndexer: 'ok' })
   assert.deepEqual(h.entries.map(e => [e.kind, e.direction, e.amount]), [
@@ -45,7 +45,7 @@ test('ETH and USDT entries are merged newest first with direction and amounts', 
 })
 
 test('without an indexer key the ETH half still comes and the footer says why', async () => {
-  const h = await history(ME)
+  const h = await history(ME, { network: 'sepolia' })
   assert.equal(h.entries.filter(e => e.kind === 'USDT').length, 0)
   assert.equal(h.entries.length, 3)
   assert.match(h.sources.wdkIndexer, /no key/)
@@ -54,21 +54,21 @@ test('without an indexer key the ETH half still comes and the footer says why', 
 
 test('an address Blockscout never saw is an empty history, not an error', async () => {
   globalThis.fetch = async () => new Response('{"message":"Not found"}', { status: 404 })
-  const h = await history(OTHER)
+  const h = await history(OTHER, { network: 'sepolia' })
   assert.deepEqual(h.entries, [])
   assert.equal(h.sources.blockscout, 'ok')
 })
 
 test('limit caps the merged list', async () => {
   process.env.WDK_INDEXER_API_KEY = 'k'
-  const h = await history(ME, { limit: 2 })
+  const h = await history(ME, { limit: 2, network: 'sepolia' })
   assert.equal(h.entries.length, 2)
 })
 
 test('a pending transaction has no timestamp yet, sorts first and is not marked failed', async () => {
   const pending = { hash: '0xp1', from: { hash: ME }, to: { hash: OTHER }, value: '1000000000000000', timestamp: null, status: null, fee: null, block_number: null, method: null }
   globalThis.fetch = async (url) => new Response(JSON.stringify(String(url).includes('blockscout') ? { items: [pending, ...blockscout.items] } : indexer), { status: 200 })
-  const h = await history(ME)
+  const h = await history(ME, { network: 'sepolia' })
   assert.equal(h.entries[0].hash, '0xp1')
   assert.equal(h.entries[0].status, 'pending')
   assert.equal(h.entries[0].timestamp, null)
@@ -77,4 +77,13 @@ test('a pending transaction has no timestamp yet, sorts first and is not marked 
 
 test('a bad address is rejected', async () => {
   await assert.rejects(history('0x123'), /bad address|invalid/i)
+})
+
+test('the default network is Arbitrum, with USDT0 labels and Arbiscan links', async () => {
+  process.env.WDK_INDEXER_API_KEY = 'k'
+  const h = await history(ME)
+  assert.ok(calls.some(c => c.url.startsWith('https://arbitrum.blockscout.com/')))
+  assert.ok(calls.some(c => c.url.includes('/api/v1/arbitrum/usdt/')))
+  assert.equal(h.entries.find(e => e.source === 'wdk-indexer').kind, 'USDT0')
+  assert.match(h.entries[0].link, /^https:\/\/arbiscan\.io\/tx\//)
 })

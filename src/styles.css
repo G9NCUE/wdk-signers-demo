@@ -268,3 +268,13 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 .switch input:checked + .knob { background: var(--accent); }
 .switch input:checked + .knob::after { transform: translateX(16px); }
 .switch.off { opacity: .5; cursor: not-allowed; }
+
+/* the atlas' pending toggle, for the testnet mode */
+.testnet-toggle { display: inline-flex; align-items: center; gap: 10px; height: 36px; padding: 0 12px 0 8px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); color: var(--secondary); font-size: 13px; font-weight: 500; cursor: pointer; }
+.testnet-toggle:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line-subtle)); color: var(--ink); }
+.testnet-toggle input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.testnet-toggle .knob { position: relative; flex: none; width: 32px; height: 18px; border-radius: 9px; background: var(--muted); transition: background .15s; }
+.testnet-toggle .knob::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--ink); transition: transform .15s; }
+.testnet-toggle input:checked + .knob { background: var(--warning); }
+.testnet-toggle input:checked + .knob::after { transform: translateX(14px); }
+.testnet-toggle:has(input:checked) { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 50%, var(--line)); }

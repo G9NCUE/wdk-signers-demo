@@ -29,6 +29,9 @@ test('the picker lists the seven signers with their custody badge', async (t) =>
   if (guard(t)) return
   await page.goto(URL)
   await page.waitForSelector('.chip')
+  // the suite runs on the testnet; the default is mainnet, behind the toggle
+  if (!(await page.$eval('.testnet-toggle input', i => i.checked))) await page.click('.testnet-toggle')
+  await page.waitForFunction(() => document.querySelector('.tile .status-pill')?.textContent === 'Sepolia')
   await page.click('.chip')
   await page.waitForSelector('.sheet')
   const rows = await page.$$eval('.signer', els => els.map(b => [b.querySelector('.label').textContent, b.querySelector('.where').textContent, !b.disabled]))
@@ -93,7 +96,7 @@ test(`${SIGNER}: the send sheet lists the other demo accounts, then is cancelled
   assert.equal(await page.$$eval('.log li', l => l.length), logBefore, 'nothing was sent')
 })
 
-test('switching to Arbitrum on the seed signer shows USDT0 balances and offers a gasless USDT0 send', async (t) => {
+test('the testnet toggle off puts the seed signer on Arbitrum with USDT0 balances and a gasless USDT0 send', async (t) => {
   if (guard(t)) return
   // the seed signer is on every network; the default browser signer may not be
   await page.click('.chip'); await page.waitForSelector('.sheet')
@@ -101,11 +104,10 @@ test('switching to Arbitrum on the seed signer shows USDT0 balances and offers a
   await page.waitForSelector('.state-dot.ready', { timeout: 60000 })
   await page.click('.tile .status-pill')
   await page.waitForSelector('.sheet')
-  const networks = await page.$$eval('.sheet .signer .label', els => els.map(e => e.textContent))
-  assert.deepEqual(networks, ['Sepolia', 'Arbitrum One'])
-  const arbitrum = await page.$('.sheet .signer:has-text("Arbitrum")')
-  if (await arbitrum.isDisabled()) { await page.keyboard.press('Escape'); return t.skip(`${SIGNER} is not configured for Arbitrum`) }
-  await arbitrum.click()
+  assert.deepEqual(await page.$$eval('.sheet .signer .label', els => els.map(e => e.textContent)), ['Sepolia'], 'testnet mode lists the testnets')
+  await page.keyboard.press('Escape')
+  await page.waitForSelector('.sheet', { state: 'detached' })
+  await page.click('.testnet-toggle')
   await page.waitForSelector('.state-dot.ready', { timeout: 60000 })
   await page.waitForFunction(() => document.querySelector('.tokens')?.textContent.includes('USDT0'), null, { timeout: 30000 })
   assert.equal(await page.$eval('.tile .status-pill', e => e.textContent), 'Arbitrum One')
@@ -116,7 +118,10 @@ test('switching to Arbitrum on the seed signer shows USDT0 balances and offers a
   assert.match(await page.$eval('.btn.primary', b => b.textContent), /^Send 1 USDT0 to .*, gasless$/)
   await page.click('.btn:has-text("Cancel")')
   await page.click('.tile .status-pill')
-  await page.click('.sheet .signer:has-text("Sepolia")')
+  assert.deepEqual(await page.$$eval('.sheet .signer .label', els => els.map(e => e.textContent)), ['Arbitrum One'], 'mainnet mode lists the mainnets')
+  await page.keyboard.press('Escape')
+  await page.waitForSelector('.sheet', { state: 'detached' })
+  await page.click('.testnet-toggle')
   await page.waitForSelector('.state-dot.ready', { timeout: 60000 })
   assert.equal(await page.$eval('.tile .status-pill', e => e.textContent), 'Sepolia')
 })

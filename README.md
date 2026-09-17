@@ -3,7 +3,7 @@
 One wallet, seven ways to hold the key. A Vite app on the [Tether WDK](https://github.com/tetherto/wdk-wallet-evm)
 where a single `WalletManagerEvm` runs on one `ISigner` at a time: a seed phrase, a Ledger, MetaMask,
 Turnkey, Dfns, Openfort or Fireblocks. Pick a signer, the phone shows its accounts, balances and
-history on Sepolia; sign a message, sign a transaction offline, or send ETH to another account the
+history on Arbitrum One (or Sepolia behind the testnet toggle); sign a message, sign a transaction offline, or send ETH to another account the
 demo controls. A developer panel keeps every call with the bytes behind it.
 
 ![The demo: the phone with a Dfns account selected, the log open beside it](docs/demo.png)
@@ -22,9 +22,10 @@ demo controls. A developer panel keeps every call with the bytes behind it.
 
 ## Networks
 
-The network pill on the balance card switches between **Sepolia** (testnet, the default) and
-**Arbitrum One** (mainnet). The signer stays, the wallet is rebuilt on the other chain, balances and
-history follow. On Arbitrum the card also shows the **USDT0** balance, the send sheet offers ETH or
+The demo runs on **Arbitrum One** by default. A discreet **Testnet** toggle in the top bar switches
+to **Sepolia** and back; the choice is remembered per browser. The network pill on the balance card
+shows the current network and lists the networks of the current mode. On a switch the signer stays,
+the wallet is rebuilt on the other chain, balances and history follow. On Arbitrum the card also shows the **USDT0** balance, the send sheet offers ETH or
 USDT0, and a USDT0 send defaults to **gasless**: the WDK's `wdk-wallet-evm-7702-gasless` module wraps
 the account, delegates it with an EIP-7702 authorization and sends a user operation through Candide's
 public bundler, gas paid in USDT0 by the paymaster. That works with every signer that signs an
@@ -144,5 +145,6 @@ Font License, see the LICENSE.md there), 10 px cards on 1 px lines, mono upperca
 
 ## Status
 
-A prototype for the WDK "Abstract signer" work, on Sepolia only. It tests a contract, it does not
-custody funds. Apache-2.0.
+A prototype for the WDK "Abstract signer" work. It runs on Arbitrum One by default with real USDT0,
+so the seed phrase kept in the browser is a hot key: keep small amounts on it. It tests a contract,
+it does not custody funds. Apache-2.0.
