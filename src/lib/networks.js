@@ -29,10 +29,13 @@ export const NETWORKS = {
     blockscout: 'https://arbitrum.blockscout.com',
     indexer: 'arbitrum',
     tokens: [{ symbol: 'USDT0', address: USDT0_ARBITRUM, decimals: 6, indexer: 'usdt' }],
+    primary: 'USDT0', // the balance the card leads with; the native coin otherwise
     gasless: {
       bundlerUrl: 'https://api.candide.dev/public/v3/42161',
-      delegationAddress: '0xe6Cae83BdE06E4c305530e199D7217f42808555B', // EntryPoint v0.8 reference implementation
-      entryPointVersion: '0.8',
+      // EntryPoint v0.9 and its reference delegate: Candide's public Arbitrum bundler rejects v0.8
+      // operations at eth_sendUserOperation with a garbled -32500 (verified 2026-09-17), v0.9 goes through
+      delegationAddress: '0xa46cc63eBF4Bd77888AA327837d20b23A63a56B5',
+      entryPointVersion: '0.9',
       paymasterToken: { address: USDT0_ARBITRUM, symbol: 'USDT0', decimals: 6 }
     },
     fireblocksAsset: 'ETH-AETH',

@@ -136,6 +136,13 @@ Ledger and MetaMask need a device or an extension in a headed browser and stay m
   with the `m/` prefix, which the packages here follow.
 - The Ledger Ethereum kit 1.18 signs EIP-7702 authorizations (`signDelegationAuthorization`), which
   PR #89 of `wdk-wallet-evm` declared impossible in July.
+- `wdk-wallet-evm-erc-4337` reads the seed's private key, so only the seed signer can use it;
+  `wdk-wallet-evm-7702-gasless` wraps any account and needs `signAuthorization` only, so every signer
+  here but MetaMask can go gasless. It pins `wdk-wallet-evm` beta.17 and checks `instanceof`, hence
+  the npm `overrides` in `package.json`.
+- Candide's public Arbitrum bundler rejects EntryPoint v0.8 user operations at `eth_sendUserOperation`
+  with a garbled `-32500` (the error text is the EntryPoint's bytecode), while estimation and the
+  paymaster quote pass; the same operation on EntryPoint v0.9 goes through. The demo uses v0.9.
 
 ## Design
 

@@ -253,15 +253,28 @@ export default function App () {
                 <span className='tile-label'>{account ? (selected.isDerivable === false ? 'Account' : `Account ${account.index}`) : selected ? selected.label : 'Wallet'}</span>
                 <button className={`status-pill ${net.testnet ? 'plain' : 'warn'} as-button`} onClick={() => setNetSheet(true)} aria-haspopup='dialog' title='switch network'>{net.label}</button>
               </div>
-              <div className='tile-value' title={account?.balance ?? ''}>
-                {phase === 'connecting' ? <span className='skeleton' /> : balance ?? '—'}
-                {balance !== null && phase === 'ready' && <span className='unit'>{net.native}</span>}
-              </div>
-              {account?.tokens?.length > 0 && (
-                <div className='tokens'>
-                  {account.tokens.map(t => <span key={t.address} className='token'><b>{shortBalance(t.balance) ?? '…'}</b> {t.symbol}</span>)}
-                </div>
-              )}
+              {(() => {
+                // the card leads with the network's primary asset (USDT0 on Arbitrum), the others follow
+                const lead = net.primary ? account?.tokens?.find(t => t.symbol === net.primary) : null
+                const leadValue = net.primary ? shortBalance(lead?.balance) : balance
+                const leadUnit = net.primary ?? net.native
+                const rest = net.primary
+                  ? [{ symbol: net.native, balance }, ...(account?.tokens ?? []).filter(t => t.symbol !== net.primary)]
+                  : (account?.tokens ?? [])
+                return (
+                  <>
+                    <div className='tile-value' title={net.primary ? (lead?.balance ?? '') : (account?.balance ?? '')}>
+                      {phase === 'connecting' || (phase === 'ready' && account && leadValue === null) ? <span className='skeleton' /> : (account ? leadValue ?? '—' : '—')}
+                      {account && phase === 'ready' && leadValue !== null && <span className='unit'>{leadUnit}</span>}
+                    </div>
+                    {account && rest.length > 0 && (
+                      <div className='tokens'>
+                        {rest.map(t => <span key={t.symbol} className='token'><b>{shortBalance(t.balance) ?? '…'}</b> {t.symbol}</span>)}
+                      </div>
+                    )}
+                  </>
+                )
+              })()}
               <div className='addr'>
                 {account
                   ? (
@@ -280,7 +293,7 @@ export default function App () {
               <div className='pills'>
                 {accounts.map((a, i) => (
                   <button key={a.index} className={`pill ${i === current ? 'active' : ''}`} onClick={() => setCurrent(i)} title={a.address}>
-                    #{a.index} <span>{shortBalance(a.balance) ?? '…'}{a.tokens?.[0] ? ` · ${shortBalance(a.tokens[0].balance)} ${a.tokens[0].symbol}` : ''}</span>
+                    #{a.index} <span>{net.primary && a.tokens?.[0] ? `${shortBalance(a.tokens[0].balance) ?? '…'} ${a.tokens[0].symbol} · ${shortBalance(a.balance) ?? '…'} ${net.native}` : `${shortBalance(a.balance) ?? '…'}${a.tokens?.[0] ? ` · ${shortBalance(a.tokens[0].balance)} ${a.tokens[0].symbol}` : ''}`}</span>
                   </button>
                 ))}
               </div>
