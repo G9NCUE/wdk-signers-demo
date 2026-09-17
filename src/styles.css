@@ -347,6 +347,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 .step-who { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .step-sub { font-size: 12px; line-height: 16px; color: var(--secondary); }
 .step-links { display: flex; gap: 6px; margin-top: 2px; }
+.step-links .btn { flex: none; height: 32px; font-size: 13px; }
 
 .detail { display: flex; flex-direction: column; gap: 10px; margin-top: -1px; padding: 14px 16px 16px; border: 1px solid var(--accent); border-top: 1px solid var(--line-subtle); border-radius: 0 0 var(--radius-control) var(--radius-control); background: var(--surface); }
 .proposals li:has(.detail) .proposal { border-radius: var(--radius-control) var(--radius-control) 0 0; }

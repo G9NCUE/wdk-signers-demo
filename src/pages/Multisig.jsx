@@ -684,6 +684,11 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
                     {i !== 1 && s.who && <div className='step-who'>{custodyPill(s.who, 'who')}{s.who.at && <span className='muted small'>{when(s.who.at)}</span>}</div>}
                     {i === 2 && p?.execution && <div className='step-who'><span className='muted small'>{when(p.execution.at)}</span></div>}
                     <div className='step-sub'>{s.sub}</div>
+                    {i === 2 && p?.status === 'expired' && (
+                      <div className='step-links'>
+                        <button className='btn primary' disabled={busy !== null} onClick={() => openTransfer(p.proposedBy, p.meta)}>Re-propose {p.meta ? `${p.meta.amount} ${p.meta.asset}` : ''}</button>
+                      </div>
+                    )}
                     {i === 2 && p?.execution && (
                       <div className='step-links'>
                         <a className='mini' href={`${net.blockscout}/op/${p.execution.hash}`} target='_blank' rel='noreferrer'>user op</a>
