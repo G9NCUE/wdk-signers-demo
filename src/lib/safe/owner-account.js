@@ -9,6 +9,8 @@ import { THROWAWAY_SEED } from '../wallet.js'
 export default class SafeOwnerAccount extends WalletAccountMultisigEvmSafe4337 {
   constructor (account, config) {
     super(THROWAWAY_SEED, "0'/0/0", config)
+    // the swap rests on a private field; a module that renamed it would sign with the throwaway seed
+    if (!this._signerAccount) throw new Error('wdk-protocol-multisig-safe no longer keeps its owner in _signerAccount; the owner shim cannot swap it')
     this._signerAccount.dispose() // the seed-built owner is never used
     this._signerAccount = account
   }

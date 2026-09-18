@@ -179,13 +179,20 @@ test('the Safe routes refuse what they should: unknown network, bad body, a stra
   await twin.forgetSafe()
 })
 
-test('messages go through the same three calls', async () => {
+test('messages go through the same three calls: the proposer counts, the message comes back as given, a stranger is refused', async () => {
   const c = coordinator()
   const id = keccak256(toUtf8Bytes('hello'))
   assert.equal(await c.getMessage(id), null)
-  await c.submitMessage('0x0000000000000000000000000000000000000001', id, { message: 'hello', signature: signDigest(0, id) })
+  await assert.rejects(c.submitMessage('0x0000000000000000000000000000000000000001', id, { message: 'hello', signature: signDigest(9, id) }), /not an owner of this Safe/)
+
+  const proposed = await c.submitMessage('0x0000000000000000000000000000000000000001', id, { message: 'hello', signature: signDigest(0, id) })
+  assert.equal(proposed.message, 'hello', 'what the module hashes again before approving')
+  assert.deepEqual(proposed.confirmations.map(x => x.owner), [key(0).address], 'the proposer signed first')
+
+  await assert.rejects(c.confirmMessage(id, signDigest(7, id)), /not an owner of this Safe/)
   await c.confirmMessage(id, signDigest(4, id))
-  assert.equal((await c.getMessage(id)).confirmations.length, 1)
+  await c.confirmMessage(id, signDigest(4, id))
+  assert.deepEqual((await c.getMessage(id)).confirmations.map(x => x.owner), [key(0).address, key(4).address], 'confirming twice counts once')
   await assert.rejects(c.confirmMessage(keccak256(toUtf8Bytes('nope')), '0x'), /unknown message/)
 })
 

@@ -33,10 +33,11 @@ export const NETWORKS = {
     primary: 'USDT0', // the balance the card leads with; the native coin otherwise
     gasless: {
       bundlerUrl: 'https://api.candide.dev/public/v3/42161',
-      // EntryPoint v0.9 and its reference delegate: Candide's public Arbitrum bundler rejects v0.8
-      // operations at eth_sendUserOperation with a garbled -32500 (verified 2026-09-17), v0.9 goes through
-      delegationAddress: '0xa46cc63eBF4Bd77888AA327837d20b23A63a56B5',
-      entryPointVersion: '0.9',
+      // EntryPoint v0.8 and its reference delegate, the module's default. Candide's public Arbitrum
+      // bundler rejected v0.8 sends on 2026-09-17 (their bug, fixed the same day in voltaire #79, verified
+      // on the 18th); v0.9 with 0xa46cc63eBF4Bd77888AA327837d20b23A63a56B5 works too
+      delegationAddress: '0xe6Cae83BdE06E4c305530e199D7217f42808555B',
+      entryPointVersion: '0.8',
       paymasterToken: { address: USDT0_ARBITRUM, symbol: 'USDT0', decimals: 6 }
     },
     // the Safe 2-of-3: Safe modules v0.2.0 on EntryPoint v0.6, gas paid in USDT0 through Candide's

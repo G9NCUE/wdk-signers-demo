@@ -193,7 +193,7 @@ workaround for each until they move.
 | A Safe proposal dies once the paymaster's sponsorship expires, three minutes with Candide, because the owners' signatures cover it | countdown, `expired` status, re-propose | [multisig-safe #26](https://github.com/tetherto/wdk-protocol-multisig-safe/issues/26) |
 | The 7702 module's typed data carries BigInt values, which a signer behind an API has to make JSON-safe | done in the Dfns and Ledger packages | [7702-gasless #42](https://github.com/tetherto/wdk-wallet-evm-7702-gasless/issues/42) |
 | The 7702 module pins `wdk-wallet-evm` beta.17 and checks `instanceof`, so a beta.18 account is not recognised | npm `overrides` in `package.json` | [7702-gasless #43](https://github.com/tetherto/wdk-wallet-evm-7702-gasless/issues/43) |
-| Candide's public Arbitrum bundler rejects EntryPoint v0.8 sends, v0.9 goes through | v0.9 in `src/lib/networks.js` | [7702-gasless #44](https://github.com/tetherto/wdk-wallet-evm-7702-gasless/issues/44) |
+| Candide's public Arbitrum bundler rejected EntryPoint v0.8 sends (a bundler bug, fixed by Candide the same day) | none any more, the demo is back on the module's default v0.8 | [7702-gasless #44](https://github.com/tetherto/wdk-wallet-evm-7702-gasless/issues/44), closed |
 | `WalletManager.dispose()` skips accounts without a private key, so an external signer's accounts keep signing | a lifecycle shared by a root signer and its children | [wdk-wallet #73](https://github.com/tetherto/wdk-wallet/issues/73) |
 
 Two more, not filed, that shape the demo: `account.signTransaction()` hands the request to the

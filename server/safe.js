@@ -156,8 +156,14 @@ export function createSafeRoutes ({ dir, log = console.error }) {
   })
 
   app.post('/:network/:config/messages', async (c) => {
-    const { safeAddress, messageId, message } = await readJson(c)
-    return json(c, await c.get('coordinator').submitMessage(safeAddress, messageId, message), 201)
+    if (!c.get('safe')) return fail(c, 'no Safe for this configuration yet', 404)
+    try {
+      const { safeAddress, messageId, message } = await readJson(c)
+      return json(c, await c.get('coordinator').submitMessage(safeAddress, messageId, message ?? {}), 201)
+    } catch (e) {
+      log(`[safe] message: ${e.message}`)
+      return fail(c, e.message)
+    }
   })
 
   app.get('/:network/:config/messages/:id', async (c) => {
@@ -170,7 +176,8 @@ export function createSafeRoutes ({ dir, log = console.error }) {
       const { signature } = await readJson(c)
       return json(c, await c.get('coordinator').confirmMessage(c.req.param('id'), signature))
     } catch (e) {
-      return fail(c, e.message, 404)
+      log(`[safe] confirm message: ${e.message}`)
+      return fail(c, e.message, /unknown message/.test(e.message) ? 404 : 400)
     }
   })
 

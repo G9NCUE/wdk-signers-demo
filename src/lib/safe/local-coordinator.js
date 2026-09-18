@@ -38,8 +38,14 @@ export default class LocalCoordinator extends IMultisigCoordinator {
     return record
   }
 
-  async submitMessage (safeAddress, messageId, message) {
-    const record = { safeAddress, messageId, message, confirmations: [], createdAt: new Date().toISOString() }
+  // the module submits `{ message, signature }` and reads `record.message` back to hash it, so the
+  // message is kept as it was given and the proposer's signature is the first confirmation, as the
+  // Safe Transaction Service does; a message id is the hash the owners sign
+  async submitMessage (safeAddress, messageId, { message, signature }) {
+    const known = await this.getMessage(messageId)
+    if (known) return known
+    const owner = this._recover(messageId, signature)
+    const record = { safeAddress, messageId, message, confirmations: [{ owner, signature, at: new Date().toISOString() }], createdAt: new Date().toISOString() }
     await this._store.set(`msg:${messageId}`, record)
     return record
   }
@@ -51,7 +57,9 @@ export default class LocalCoordinator extends IMultisigCoordinator {
   async confirmMessage (messageId, signature) {
     const record = await this.getMessage(messageId)
     if (!record) throw new Error(`unknown message ${messageId}`)
-    record.confirmations.push({ signature, at: new Date().toISOString() })
+    const owner = this._recover(messageId, signature)
+    if (record.confirmations.some(c => c.owner === owner)) return record
+    record.confirmations.push({ owner, signature, at: new Date().toISOString() })
     await this._store.set(`msg:${messageId}`, record)
     return record
   }

@@ -78,7 +78,9 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
   const [copied, setCopied] = useState(null)
   const [receiptsPending, setReceiptsPending] = useState(() => new Set())
   const unmounted = useRef(false)
-  useEffect(() => () => { unmounted.current = true }, [])
+  // set back on mount: StrictMode mounts, unmounts and mounts again, and the ref survives it
+  useEffect(() => { unmounted.current = false; return () => { unmounted.current = true } }, [])
+  const following = useRef(new Set()) // proposals whose receipt is being looked for, or was given up on
   const handles = useRef(new Map()) // signerId -> { entry, handle, accounts }
   const [slot, setSlot] = useState(null)
   useEffect(() => { setSlot(document.getElementById('dev-top')) }, [devOpen]) // oxlint-disable-line react/set-state-in-effect -- a DOM lookup, once the column exists
@@ -273,15 +275,19 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
   // the receipt, when the bundler has it; the page is not blocked meanwhile, and a page that moved
   // on (other scope, unmounted) drops the result
   const followReceipt = useCallback((proposalId, execution, who) => {
+    if (following.current.has(proposalId)) return
+    following.current.add(proposalId)
     const gen = generation.current
     const bundlerUrl = net.safe.bundlerUrl
     const safeAddress = safe.address
     const alive = () => gen === generation.current && !unmounted.current
     setReceiptsPending(s => new Set(s).add(proposalId))
     ;(async () => {
+      let gaveUp = false
       try {
         for (let i = 0; i < RECEIPT_TRIES && alive(); i++) {
-          await new Promise(r => setTimeout(r, 3000))
+          if (i > 0) await new Promise(r => setTimeout(r, 3000))
+          if (!alive()) return
           let receipt = null
           try { receipt = await userOperationReceipt(bundlerUrl, execution.hash) } catch {}
           if (!receipt) continue
@@ -292,8 +298,13 @@ export default function Multisig ({ signers, net, append, serviceError, devOpen 
           await refreshBalances(safeAddress)
           return
         }
-        if (alive()) append({ ok: false, signer: who, text: `no receipt after ${RECEIPT_TRIES * 3} s, check the explorer`, link: `${net.blockscout}/op/${execution.hash}` })
+        if (alive()) {
+          gaveUp = true
+          append({ ok: false, signer: who, text: `no receipt after ${RECEIPT_TRIES * 3} s, check the explorer`, link: `${net.blockscout}/op/${execution.hash}` })
+        }
       } finally {
+        // an operation given up on stays in the set, or its open row would start the poll again
+        if (!gaveUp) following.current.delete(proposalId)
         setReceiptsPending(s => { const n = new Set(s); n.delete(proposalId); return n })
       }
     })()
